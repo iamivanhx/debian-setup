@@ -1,4 +1,5 @@
-#! bin/bash
+#!/bin/bash
+
 ##############################################################################
 # Debian 13 Trixie Post-Installation Setup Script
 # For Beelink SER8 AMD Ryzen 7 8845HS
@@ -9,14 +10,18 @@
 # - Essential packages installation
 # - AMD GPU drivers and firmware
 # - Network configuration
+# - Zsh and Oh My Zsh installation
+# - Starship prompt (modern alternative to Powerlevel10k)
+# - Nerd Fonts
 # - Basic utilities and tools
 ##############################################################################
+
 set -e
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
+YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 MAGENTA='\033[0;35m'
 CYAN='\033[0;36m'
@@ -49,8 +54,9 @@ print_banner() {
     cat << "EOF"
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
-║   Debian 13 Trixie Post-Installation Setup                ║
-║   Optimized for Beelink SER8 (AMD Ryzen 7 8845HS)         ║
+║   Debian 13 Trixie Post-Installation Setup               ║
+║   Optimized for Beelink SER8 (AMD Ryzen 7 8845HS)        ║
+║   with Zsh + Starship                                     ║
 ║                                                           ║
 ╚═══════════════════════════════════════════════════════════╝
 EOF
@@ -68,38 +74,36 @@ check_root() {
 
 # Check and setup sudo
 check_sudo() {
-    print_step "Checking sudo priviliges..."
-
+    print_step "Checking sudo privileges..."
+    
     # Check if sudo is installed
     if ! command -v sudo &> /dev/null; then
         print_error "sudo is not installed on this system."
         print_error ""
         print_error "Please run the following commands as root:"
-        print_error " su -"
-        print_error " apt update"
-        print_error " apt install -y sudo"
-        print_error " usermod -aG sudo $USER"
-        print_error " exit"
-        print_error ""
-        print_error "Then log out, log back in, and run this script again."
-        exit 1
-    fi 
-
-    # Check if user is in sudo group
-    if ! groups | grep -q '\bsudo\b'; then
-        print_error "User '$USER' is not in the sudo group"
-        print_error ""
-        print_error "Please run the following commands as root:"
-        print_error " su -"
-        print_error " apt update"
-        print_error " apt install -y sudo"
-        print_error " usermod -aG sudo $USER"
-        print_error " exit"
+        print_error "  su -"
+        print_error "  apt update"
+        print_error "  apt install -y sudo"
+        print_error "  usermod -aG sudo $USER"
+        print_error "  exit"
         print_error ""
         print_error "Then log out, log back in, and run this script again."
         exit 1
     fi
-
+    
+    # Check if user is in sudo group
+    if ! groups | grep -q '\bsudo\b'; then
+        print_error "User '$USER' is not in the sudo group."
+        print_error ""
+        print_error "Please run the following commands as root:"
+        print_error "  su -"
+        print_error "  usermod -aG sudo $USER"
+        print_error "  exit"
+        print_error ""
+        print_error "Then log out, log back in, and run this script again."
+        exit 1
+    fi
+    
     # Test sudo access
     if ! sudo -n true 2>/dev/null; then
         print_warning "Testing sudo access (you may need to enter your password)..."
@@ -108,31 +112,32 @@ check_sudo() {
             exit 1
         fi
     fi
-
+    
     print_success "Sudo access confirmed!"
 }
 
 # Update system
 update_system() {
     print_step "Updating system packages..."
-
+    
     sudo apt update
     sudo apt upgrade -y
     sudo apt dist-upgrade -y
-
+    
     print_success "System updated successfully!"
 }
 
 # Install essential packages
 install_essentials() {
     print_step "Installing essential packages..."
-
+    
     sudo apt install -y \
         build-essential \
         git \
         wget \
         curl \
         vim \
+        nano \
         htop \
         btop \
         neofetch \
@@ -147,22 +152,23 @@ install_essentials() {
         gnupg \
         lsb-release \
         dkms \
-        linux-headers-$(uname -r)
-
+        linux-headers-$(uname -r) \
+        jq
+    
     print_success "Essential packages installed!"
 }
 
 # Install AMD firmware and drivers
 install_amd_support() {
-    print_step "Installing AMD and GPU drivers..."
-
+    print_step "Installing AMD firmware and GPU drivers..."
+    
     # Install AMD firmware packages
     sudo apt install -y \
         firmware-linux \
         firmware-linux-nonfree \
         firmware-amd-graphics \
         amd64-microcode
-
+    
     # Install Mesa and Vulkan drivers
     sudo apt install -y \
         mesa-utils \
@@ -177,25 +183,25 @@ install_amd_support() {
         xserver-xorg-video-amdgpu \
         vainfo \
         vdpauinfo
-
-    # Enable 32-but support for gaming/compatibility
+    
+    # Enable 32-bit support for gaming/compatibility
     print_msg "Enabling 32-bit architecture support..."
     sudo dpkg --add-architecture i386
     sudo apt update
-
+    
     sudo apt install -y \
         mesa-vulkan-drivers:i386 \
         libvulkan1:i386 \
         mesa-utils:i386 \
         libgl1-mesa-dri:i386
-
+    
     print_success "AMD drivers and firmware installed!"
 }
 
 # Install network tools
 install_network_tools() {
     print_step "Installing network tools..."
-
+    
     sudo apt install -y \
         network-manager \
         network-manager-gnome \
@@ -212,17 +218,17 @@ install_network_tools() {
         bridge-utils \
         vlan
     
-    # Enable network manager
+    # Enable NetworkManager
     sudo systemctl enable NetworkManager
     sudo systemctl start NetworkManager
-
+    
     print_success "Network tools installed!"
 }
 
 # Install audio support
 install_audio_support() {
     print_step "Installing audio support (PipeWire)..."
-
+    
     sudo apt install -y \
         pipewire \
         pipewire-audio \
@@ -233,10 +239,10 @@ install_audio_support() {
         pavucontrol \
         alsa-utils \
         pulseaudio-utils
-
+    
     # Enable PipeWire services
     systemctl --user --now enable pipewire pipewire-pulse wireplumber 2>/dev/null || true
-
+    
     print_success "Audio support installed!"
 }
 
@@ -275,6 +281,498 @@ install_compression_tools() {
     print_success "Compression tools installed!"
 }
 
+# Install fonts (including Nerd Fonts)
+install_fonts() {
+    print_step "Installing fonts (including Nerd Fonts)..."
+    
+    # Install standard fonts
+    sudo apt install -y \
+        fonts-liberation \
+        fonts-liberation2 \
+        fonts-dejavu \
+        fonts-noto \
+        fonts-noto-color-emoji \
+        fonts-roboto \
+        fonts-ubuntu \
+        fonts-font-awesome \
+        fonts-powerline \
+        fonts-firacode \
+        fonts-hack \
+        fonts-cascadia-code \
+        ttf-mscorefonts-installer
+    
+    # Install Nerd Fonts
+    print_msg "Installing Nerd Fonts..."
+    
+    # Create fonts directory
+    mkdir -p ~/.local/share/fonts
+    
+    # Download and install popular Nerd Fonts
+    NERD_FONTS_VERSION="v3.1.1"
+    FONTS_DIR="$HOME/.local/share/fonts/NerdFonts"
+    mkdir -p "$FONTS_DIR"
+    
+    # Array of Nerd Fonts to install
+    declare -a NERD_FONTS=(
+        "JetBrainsMono"
+        "FiraCode"
+        "Hack"
+        "Meslo"
+        "RobotoMono"
+        "UbuntuMono"
+        "CascadiaCode"
+        "SourceCodePro"
+    )
+    
+    print_msg "Downloading Nerd Fonts (this may take a few minutes)..."
+    
+    for FONT in "${NERD_FONTS[@]}"; do
+        print_msg "Installing ${FONT} Nerd Font..."
+        
+        FONT_URL="https://github.com/ryanoasis/nerd-fonts/releases/download/${NERD_FONTS_VERSION}/${FONT}.zip"
+        TEMP_ZIP="/tmp/${FONT}.zip"
+        
+        if wget -q "$FONT_URL" -O "$TEMP_ZIP"; then
+            unzip -qo "$TEMP_ZIP" -d "$FONTS_DIR/${FONT}" 2>/dev/null
+            rm "$TEMP_ZIP"
+            print_msg "✓ ${FONT} installed"
+        else
+            print_warning "Failed to download ${FONT}, skipping..."
+        fi
+    done
+    
+    # Update font cache
+    print_msg "Updating font cache..."
+    fc-cache -fv
+    
+    print_success "Fonts installed successfully!"
+}
+
+# Install Zsh
+install_zsh() {
+    print_step "Installing Zsh..."
+    
+    sudo apt install -y zsh
+    
+    print_success "Zsh installed!"
+}
+
+# Install Oh My Zsh
+install_oh_my_zsh() {
+    print_step "Installing Oh My Zsh..."
+    
+    # Check if Oh My Zsh is already installed
+    if [ -d "$HOME/.oh-my-zsh" ]; then
+        print_warning "Oh My Zsh is already installed. Skipping..."
+        return
+    fi
+    
+    # Download and install Oh My Zsh
+    print_msg "Downloading Oh My Zsh..."
+    
+    # Use unattended installation
+    export RUNZSH=no
+    export CHSH=no
+    
+    sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+    
+    print_success "Oh My Zsh installed!"
+}
+
+# Install Zsh plugins
+install_zsh_plugins() {
+    print_step "Installing Zsh plugins..."
+    
+    ZSH_CUSTOM="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
+    
+    # Install zsh-autosuggestions
+    if [ ! -d "$ZSH_CUSTOM/plugins/zsh-autosuggestions" ]; then
+        print_msg "Installing zsh-autosuggestions..."
+        git clone https://github.com/zsh-users/zsh-autosuggestions "$ZSH_CUSTOM/plugins/zsh-autosuggestions"
+    fi
+    
+    # Install zsh-syntax-highlighting
+    if [ ! -d "$ZSH_CUSTOM/plugins/zsh-syntax-highlighting" ]; then
+        print_msg "Installing zsh-syntax-highlighting..."
+        git clone https://github.com/zsh-users/zsh-syntax-highlighting "$ZSH_CUSTOM/plugins/zsh-syntax-highlighting"
+    fi
+    
+    # Install zsh-completions
+    if [ ! -d "$ZSH_CUSTOM/plugins/zsh-completions" ]; then
+        print_msg "Installing zsh-completions..."
+        git clone https://github.com/zsh-users/zsh-completions "$ZSH_CUSTOM/plugins/zsh-completions"
+    fi
+    
+    # Install fast-syntax-highlighting
+    if [ ! -d "$ZSH_CUSTOM/plugins/fast-syntax-highlighting" ]; then
+        print_msg "Installing fast-syntax-highlighting..."
+        git clone https://github.com/zdharma-continuum/fast-syntax-highlighting "$ZSH_CUSTOM/plugins/fast-syntax-highlighting"
+    fi
+    
+    print_success "Zsh plugins installed!"
+}
+
+# Install Starship
+install_starship() {
+    print_step "Installing Starship prompt..."
+    
+    # Check if Starship is already installed
+    if command -v starship &> /dev/null; then
+        print_warning "Starship is already installed. Updating..."
+        curl -sS https://starship.rs/install.sh | sh -s -- -y
+    else
+        print_msg "Downloading and installing Starship..."
+        curl -sS https://starship.rs/install.sh | sh -s -- -y
+    fi
+    
+    print_success "Starship installed!"
+}
+
+# Configure Starship
+configure_starship() {
+    print_step "Configuring Starship..."
+    
+    # Create Starship config directory
+    mkdir -p ~/.config
+    
+    # Create a custom Starship configuration
+    cat > ~/.config/starship.toml << 'STARSHIP_CONFIG'
+# Starship Configuration
+# Get editor completions based on the config schema
+"$schema" = 'https://starship.rs/config-schema.json'
+
+# Inserts a blank line between shell prompts
+add_newline = true
+
+# Timeout for commands executed by starship (in milliseconds)
+command_timeout = 500
+
+# Format configuration
+format = """
+[┌───────────────────────────────────────────────────────>](bold green)
+[│](bold green)$os\
+$username\
+$hostname\
+$directory\
+$git_branch\
+$git_status\
+$python\
+$nodejs\
+$rust\
+$golang\
+$php\
+$java\
+$docker_context
+[│](bold green)$character"""
+
+# Right-side format
+right_format = """$cmd_duration $time"""
+
+# Character configuration
+[character]
+success_symbol = "[➜](bold green)"
+error_symbol = "[➜](bold red)"
+
+# OS module
+[os]
+disabled = false
+format = "[$symbol]($style) "
+
+[os.symbols]
+Debian = " "
+Ubuntu = " "
+Linux = " "
+
+# Username
+[username]
+style_user = "bold green"
+style_root = "bold red"
+format = "[$user]($style) "
+disabled = false
+show_always = true
+
+# Hostname
+[hostname]
+ssh_only = false
+format = "on [$hostname](bold blue) "
+disabled = false
+
+# Directory
+[directory]
+truncation_length = 3
+truncate_to_repo = true
+format = "in [$path]($style)[$read_only]($read_only_style) "
+style = "bold cyan"
+read_only = " 󰌾"
+
+# Git branch
+[git_branch]
+symbol = " "
+format = "on [$symbol$branch]($style) "
+style = "bold purple"
+
+# Git status
+[git_status]
+format = '([\[$all_status$ahead_behind\]]($style) )'
+conflicted = "🏳"
+ahead = "⇡${count}"
+behind = "⇣${count}"
+diverged = "⇕⇡${ahead_count}⇣${behind_count}"
+up_to_date = "✓"
+untracked = "?${count}"
+stashed = "$${count}"
+modified = "!${count}"
+staged = "+${count}"
+renamed = "»${count}"
+deleted = "✘${count}"
+
+# Programming Languages
+
+[python]
+symbol = " "
+format = 'via [$symbol$pyenv_prefix($version )(\($virtualenv\) )]($style)'
+style = "bold yellow"
+
+[nodejs]
+symbol = " "
+format = "via [$symbol($version )]($style)"
+style = "bold green"
+
+[rust]
+symbol = " "
+format = "via [$symbol($version )]($style)"
+style = "bold red"
+
+[golang]
+symbol = " "
+format = "via [$symbol($version )]($style)"
+style = "bold cyan"
+
+[php]
+symbol = " "
+format = "via [$symbol($version )]($style)"
+
+[java]
+symbol = " "
+format = "via [$symbol($version )]($style)"
+
+# Docker
+[docker_context]
+symbol = " "
+format = "via [$symbol$context]($style) "
+style = "bold blue"
+
+# Command duration
+[cmd_duration]
+min_time = 500
+format = "took [$duration](bold yellow)"
+
+# Time
+[time]
+disabled = false
+format = '[$time]($style) '
+style = "bold white"
+time_format = "%T"
+
+# Battery
+[battery]
+full_symbol = "🔋"
+charging_symbol = "⚡"
+discharging_symbol = "💀"
+
+[[battery.display]]
+threshold = 30
+style = "bold red"
+
+# Memory usage
+[memory_usage]
+disabled = false
+threshold = 75
+symbol = "🐏 "
+format = "$symbol[${ram}]($style) "
+style = "bold dimmed white"
+
+# Status
+[status]
+disabled = false
+format = '[\[$symbol$status\]]($style) '
+
+# Package version
+[package]
+disabled = false
+symbol = "📦 "
+STARSHIP_CONFIG
+    
+    print_success "Starship configured!"
+}
+
+# Configure Zsh with Starship
+configure_zsh() {
+    print_step "Configuring Zsh with Starship..."
+    
+    # Backup existing .zshrc if it exists
+    if [ -f "$HOME/.zshrc" ]; then
+        print_msg "Backing up existing .zshrc..."
+        cp "$HOME/.zshrc" "$HOME/.zshrc.backup.$(date +%Y%m%d_%H%M%S)"
+    fi
+    
+    # Create new .zshrc with Oh My Zsh and Starship
+    cat > "$HOME/.zshrc" << 'ZSHRC'
+# Path to oh-my-zsh installation
+export ZSH="$HOME/.oh-my-zsh"
+
+# Set theme to blank (Starship will handle the prompt)
+ZSH_THEME=""
+
+# Plugins
+plugins=(
+    git
+    sudo
+    zsh-autosuggestions
+    zsh-syntax-highlighting
+    zsh-completions
+    fast-syntax-highlighting
+    colored-man-pages
+    command-not-found
+    extract
+    history
+    copypath
+    copyfile
+    copybuffer
+    dirhistory
+    web-search
+    jsontools
+)
+
+# Load Oh My Zsh
+source $ZSH/oh-my-zsh.sh
+
+# User configuration
+
+# Preferred editor
+export EDITOR='vim'
+
+# Compilation flags
+export ARCHFLAGS="-arch x86_64"
+
+# Starship prompt
+eval "$(starship init zsh)"
+
+# Aliases
+alias update='sudo apt update && sudo apt upgrade -y'
+alias install='sudo apt install'
+alias remove='sudo apt remove'
+alias search='apt search'
+alias clean='sudo apt autoremove -y && sudo apt autoclean'
+alias ll='ls -lah'
+alias la='ls -A'
+alias l='ls -CF'
+alias ..='cd ..'
+alias ...='cd ../..'
+alias ....='cd ../../..'
+alias grep='grep --color=auto'
+alias zshconfig='vim ~/.zshrc'
+alias ohmyzsh='vim ~/.oh-my-zsh'
+alias starshipconfig='vim ~/.config/starship.toml'
+alias sysinfo='~/sysinfo.sh'
+
+# Git aliases
+alias gs='git status'
+alias ga='git add'
+alias gc='git commit'
+alias gp='git push'
+alias gl='git log --oneline --graph --decorate'
+alias gd='git diff'
+alias gco='git checkout'
+alias gb='git branch'
+
+# Docker aliases (if Docker is installed)
+alias dps='docker ps'
+alias dpsa='docker ps -a'
+alias di='docker images'
+alias dex='docker exec -it'
+alias dlog='docker logs -f'
+alias dstop='docker stop $(docker ps -q)'
+alias drm='docker rm $(docker ps -aq)'
+
+# System monitoring aliases
+alias cpu='btop'
+alias temp='sensors'
+alias ports='sudo netstat -tulanp'
+alias myip='curl ifconfig.me'
+
+# Custom functions
+mkcd() {
+    mkdir -p "$1" && cd "$1"
+}
+
+extract() {
+    if [ -f $1 ] ; then
+        case $1 in
+            *.tar.bz2)   tar xjf $1     ;;
+            *.tar.gz)    tar xzf $1     ;;
+            *.bz2)       bunzip2 $1     ;;
+            *.rar)       unrar e $1     ;;
+            *.gz)        gunzip $1      ;;
+            *.tar)       tar xf $1      ;;
+            *.tbz2)      tar xjf $1     ;;
+            *.tgz)       tar xzf $1     ;;
+            *.zip)       unzip $1       ;;
+            *.Z)         uncompress $1  ;;
+            *.7z)        7z x $1        ;;
+            *)     echo "'$1' cannot be extracted via extract()" ;;
+        esac
+    else
+        echo "'$1' is not a valid file"
+    fi
+}
+
+# Colorful man pages
+export MANPAGER="sh -c 'col -bx | bat -l man -p'"
+
+# Better history
+HISTSIZE=10000
+SAVEHIST=10000
+setopt SHARE_HISTORY
+setopt HIST_IGNORE_ALL_DUPS
+setopt HIST_FIND_NO_DUPS
+
+# Auto-completion enhancements
+autoload -U compinit && compinit
+zstyle ':completion:*' menu select
+zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
+
+# Welcome message
+if [[ -o interactive ]]; then
+    echo ""
+    echo "Welcome to $(hostname)!"
+    echo "Kernel: $(uname -r)"
+    echo "Starship prompt active 🚀"
+    echo ""
+fi
+ZSHRC
+    
+    print_success "Zsh configured with Starship!"
+}
+
+# Change default shell to Zsh
+change_shell_to_zsh() {
+    print_step "Changing default shell to Zsh..."
+    
+    # Check current shell
+    if [ "$SHELL" = "$(which zsh)" ]; then
+        print_warning "Default shell is already Zsh. Skipping..."
+        return
+    fi
+    
+    # Change shell
+    print_msg "Changing default shell to Zsh (you may need to enter your password)..."
+    chsh -s "$(which zsh)"
+    
+    print_success "Default shell changed to Zsh!"
+    print_warning "You need to log out and log back in for the shell change to take effect."
+}
+
 # Install development tools
 install_dev_tools() {
     print_step "Installing development tools..."
@@ -300,7 +798,11 @@ install_dev_tools() {
             python3-pip \
             python3-venv \
             nodejs \
-            npm
+            npm \
+            bat \
+            exa \
+            ripgrep \
+            fd-find
         
         print_success "Development tools installed!"
     else
@@ -352,29 +854,6 @@ install_filesystem_tools() {
         lvm2
     
     print_success "File system tools installed!"
-}
-
-# Install fonts
-install_fonts() {
-    print_step "Installing fonts..."
-    
-    sudo apt install -y \
-        fonts-liberation \
-        fonts-liberation2 \
-        fonts-dejavu \
-        fonts-noto \
-        fonts-noto-color-emoji \
-        fonts-roboto \
-        fonts-ubuntu \
-        fonts-font-awesome \
-        fonts-powerline \
-        fonts-jetbrains-mono \
-        ttf-mscorefonts-installer
-    
-    # Update font cache
-    fc-cache -fv
-    
-    print_success "Fonts installed!"
 }
 
 # Configure system performance
@@ -447,6 +926,7 @@ echo ""
 echo "Hostname: $(hostname)"
 echo "Kernel: $(uname -r)"
 echo "OS: $(lsb_release -d | cut -f2)"
+echo "Shell: $SHELL"
 echo ""
 echo "CPU: $(lscpu | grep "Model name" | cut -d: -f2 | xargs)"
 echo "CPU Cores: $(nproc)"
@@ -468,6 +948,13 @@ cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_driver 2>/dev/null || echo "Not
 echo ""
 echo "Temperature Sensors:"
 sensors 2>/dev/null || echo "Run 'sudo sensors-detect' first"
+echo ""
+echo "Starship Version:"
+starship --version 2>/dev/null || echo "Not installed"
+echo ""
+echo "Installed Nerd Fonts:"
+fc-list | grep -i "nerd" | wc -l
+echo "Nerd Fonts installed"
 echo "========================================="
 SYSINFO
     
@@ -494,6 +981,7 @@ Hostname: $(hostname)
 Kernel: $(uname -r)
 OS: $(lsb_release -d | cut -f2)
 User: $USER
+Shell: $SHELL
 
 Installed Components:
 ---------------------
@@ -506,7 +994,12 @@ Installed Components:
 ✓ Compression tools
 ✓ System monitoring tools
 ✓ File system tools
-✓ Fonts
+✓ Standard fonts
+✓ Nerd Fonts (JetBrains Mono, FiraCode, Hack, Meslo, etc.)
+✓ Zsh shell
+✓ Oh My Zsh framework
+✓ Starship prompt (Rust-based, fast!)
+✓ Zsh plugins (autosuggestions, syntax-highlighting, completions)
 ✓ Power management (TLP)
 ✓ Performance optimizations
 
@@ -526,22 +1019,42 @@ Memory Information:
 -------------------
 $(free -h)
 
+Starship Information:
+---------------------
+Version: $(starship --version 2>/dev/null || echo "Not installed")
+Config: ~/.config/starship.toml
+
+Zsh Configuration:
+------------------
+Default shell: $SHELL
+Oh My Zsh: $([ -d "$HOME/.oh-my-zsh" ] && echo "Installed" || echo "Not installed")
+Starship: $(command -v starship &>/dev/null && echo "Installed" || echo "Not installed")
+
 Next Steps:
 -----------
-1. Reboot the system to apply all changes:
+1. Log out and log back in for shell changes to take effect
+
+2. Customize Starship prompt (optional):
+   Edit: ~/.config/starship.toml
+   Presets: https://starship.rs/presets/
+
+3. Reboot the system to apply all changes:
    sudo reboot
 
-2. Run system info script:
+4. Run system info script:
    ~/sysinfo.sh
 
-3. Verify AMD GPU drivers:
+5. Verify AMD GPU drivers:
    vulkaninfo | grep "deviceName"
    vainfo
 
-4. Check audio:
+6. Check audio:
    pavucontrol
 
-5. Install Hyprland (if desired):
+7. Test Nerd Font icons in your terminal:
+   echo -e "\uf120 \uf0c8 \uf0c7 \uf0c9 \uf0e7"
+
+8. Install Hyprland (if desired):
    ~/hyprland-setup.sh
 
 Useful Commands:
@@ -551,6 +1064,39 @@ Useful Commands:
 - Power stats: sudo powertop
 - Network manager: nmtui
 - System info: ~/sysinfo.sh
+- Zsh config: zshconfig
+- Starship config: starshipconfig
+- Update system: update (alias)
+- Show my IP: myip
+
+Zsh Aliases Available:
+----------------------
+update          - Update system packages
+install         - Install packages
+ll              - Detailed list
+sysinfo         - Show system info
+gs/ga/gc        - Git shortcuts
+cpu             - Launch btop
+temp            - Show temperatures
+myip            - Show public IP
+starshipconfig  - Edit Starship config
+
+Starship Features:
+------------------
+✓ Lightning fast (written in Rust)
+✓ Minimal dependencies
+✓ Cross-platform
+✓ Highly customizable
+✓ Git status integration
+✓ Programming language detection
+✓ Custom symbols and icons
+✓ Command duration display
+
+Learn More:
+-----------
+- Starship docs: https://starship.rs
+- Presets: https://starship.rs/presets/
+- Configuration: https://starship.rs/config/
 
 ========================================
 EOF
@@ -561,16 +1107,16 @@ EOF
 # Main installation flow
 main() {
     print_banner
-
+    
     check_root
     check_sudo
-
-    print_msg "Starting Post-Installation Setup..."
+    
+    print_msg "Starting post-installation setup..."
     echo ""
-
+    
     # Keep sudo alive
     while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
-
+    
     update_system
     install_essentials
     install_amd_support
@@ -578,16 +1124,23 @@ main() {
     install_audio_support
     install_bluetooth
     install_compression_tools
+    install_fonts
+    install_zsh
+    install_oh_my_zsh
+    install_zsh_plugins
+    install_starship
+    configure_starship
+    configure_zsh
+    change_shell_to_zsh
     install_dev_tools
     install_monitoring_tools
     install_filesystem_tools
-    install_fonts
     configure_performance
     install_power_management
     cleanup
     create_sysinfo_script
     generate_report
-
+    
     echo ""
     print_success "====================================================="
     print_success "  Post-installation setup completed successfully!  "
@@ -596,9 +1149,16 @@ main() {
     print_msg "Installation report saved to: ~/post-install-report.txt"
     print_msg "System info script created at: ~/sysinfo.sh"
     echo ""
-    print_warning "IMPORTANT: Please reboot your system for all changes to take effect."
+    print_warning "IMPORTANT NEXT STEPS:"
+    print_warning "1. Log out and log back in for Zsh to become your default shell"
+    print_warning "2. Starship will be active immediately on first terminal launch"
+    print_warning "3. Reboot your system for all changes to take effect"
     echo ""
-
+    print_msg "Starship customization:"
+    print_msg "  - Edit config: starshipconfig"
+    print_msg "  - Browse presets: https://starship.rs/presets/"
+    echo ""
+    
     read -p "Do you want to reboot now? (y/n) " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
@@ -606,13 +1166,14 @@ main() {
         sleep 5
         sudo reboot
     else
-        print_msg "Please remember to reboot later: sudo reboot"
+        print_msg "Please remember to:"
+        print_msg "  1. Log out and log back in (for Zsh)"
+        print_msg "  2. Reboot later: sudo reboot"
     fi
 }
 
 # Run main function
 main
 
+
 chmod +x ~/debian-post-install.sh
-
-
