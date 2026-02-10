@@ -140,13 +140,12 @@ install_essentials() {
         nano \
         htop \
         btop \
-        neofetch \
+        fastfetch \
         tmux \
         tree \
         zip \
         unzip \
         p7zip-full \
-        software-properties-common \
         apt-transport-https \
         ca-certificates \
         gnupg \
