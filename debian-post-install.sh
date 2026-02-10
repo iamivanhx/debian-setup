@@ -271,7 +271,6 @@ install_compression_tools() {
         xz-utils \
         lz4 \
         zstd \
-        rar \
         unrar \
         arj \
         cabextract \
@@ -799,7 +798,7 @@ install_dev_tools() {
             nodejs \
             npm \
             bat \
-            exa \
+            eza \
             ripgrep \
             fd-find
         
