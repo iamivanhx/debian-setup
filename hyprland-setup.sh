@@ -119,7 +119,7 @@ sudo apt install -y \
     brightnessctl playerctl \
     pipewire wireplumber pipewire-audio pamixer \
     libnotify-bin dunst \
-    rofi-wayland waybar \
+    waybar \
     swaybg swaylock swayidle swayimg \
     foot thunar \
     network-manager-gnome \
@@ -133,8 +133,25 @@ sudo apt install -y \
     jq \
     bc \
     wlogout \
-    hyprpicker \
     wf-recorder
+
+# Install Rofi Wayland dependencies
+print_step "Installing Rofi Wayland dependencies..."
+sudo apt install -y \
+    libglib2.0-dev \
+    libgdk-pixbuf2.0-dev \
+    libstartup-notification0-dev \
+    libxkbcommon-dev \
+    libxkbcommon-x11-dev \
+    libxcb-ewmh-dev \
+    libxcb-icccm4-dev \
+    libxcb-xinerama0-dev \
+    libxcb-randr0-dev \
+    libxcb-xkb-dev \
+    libxcb-util-dev \
+    flex \
+    bison \
+    check
 
 # Install additional fonts for Omarchy style
 print_step "Installing additional fonts..."
@@ -169,6 +186,34 @@ cd hyprpaper
 make all
 sudo make install
 
+# Build and install hyprpicker
+print_step "Building hyprpicker..."
+cd ~
+if [ -d "hyprpicker" ]; then
+    rm -rf hyprpicker
+fi
+
+git clone https://github.com/hyprwm/hyprpicker
+cd hyprpicker
+cmake -B build
+cmake --build build
+sudo cmake --install build
+
+# Build and install Rofi Wayland
+print_step "Building Rofi Wayland from source..."
+cd ~
+if [ -d "rofi" ]; then
+    rm -rf rofi
+fi
+
+git clone https://github.com/lbonn/rofi
+cd rofi
+git checkout wayland
+
+meson setup build
+ninja -C build
+sudo ninja -C build install
+
 # Install hyprlock
 print_step "Building hyprlock..."
 cd ~
@@ -182,12 +227,27 @@ cmake -B build
 cmake --build build
 sudo cmake --install build
 
+# Install hypridle
+print_step "Building hypridle..."
+cd ~
+if [ -d "hypridle" ]; then
+    rm -rf hypridle
+fi
+
+git clone https://github.com/hyprwm/hypridle
+cd hypridle
+cmake -B build
+cmake --build build
+sudo cmake --install build
+
 # Create directory structure
 print_step "Creating configuration directories..."
 mkdir -p ~/.config/{hypr,waybar,dunst,rofi,kitty,wlogout}
 mkdir -p ~/.config/hypr/{scripts,themes}
 mkdir -p ~/.local/share/wallpapers
 mkdir -p ~/.local/bin
+mkdir -p ~/Pictures/Screenshots
+mkdir -p ~/Videos
 
 # Download wallpaper
 print_step "Downloading wallpaper..."
@@ -678,19 +738,6 @@ listener {
     on-timeout = systemctl suspend
 }
 EOF
-
-# Install hypridle
-print_step "Building hypridle..."
-cd ~
-if [ -d "hypridle" ]; then
-    rm -rf hypridle
-fi
-
-git clone https://github.com/hyprwm/hypridle
-cd hypridle
-cmake -B build
-cmake --build build
-sudo cmake --install build
 
 # Create Waybar configuration (Omarchy style)
 print_step "Creating Waybar configuration..."
@@ -1332,8 +1379,6 @@ EOF
 # Create helper scripts
 print_step "Creating helper scripts..."
 
-mkdir -p ~/Pictures/Screenshots
-
 cat > ~/.config/hypr/scripts/startup.sh << 'EOF'
 #!/bin/bash
 
@@ -1374,19 +1419,29 @@ systemctl --user enable --now pipewire pipewire-pulse wireplumber 2>/dev/null ||
 print_step "Creating session startup files..."
 echo "exec Hyprland" > ~/.xinitrc
 
+# Update library cache for rofi
+print_step "Updating library cache..."
+sudo ldconfig
+
 print_msg ""
 print_success "============================================="
 print_success "  Hyprland setup complete (Omarchy style)!  "
 print_success "============================================="
 print_msg ""
+print_msg "Components built from source:"
+print_msg "  ✓ Hyprland"
+print_msg "  ✓ Hyprpaper"
+print_msg "  ✓ Hyprpicker"
+print_msg "  ✓ Hyprlock"
+print_msg "  ✓ Hypridle"
+print_msg "  ✓ Rofi (Wayland fork)"
+print_msg ""
 print_msg "Features installed:"
-print_msg "  ✓ Hyprland with Omarchy-inspired config"
+print_msg "  ✓ Omarchy-inspired config"
 print_msg "  ✓ Catppuccin Mocha color scheme"
 print_msg "  ✓ Waybar with beautiful styling"
 print_msg "  ✓ Rofi application launcher"
 print_msg "  ✓ Dunst notifications"
-print_msg "  ✓ Hyprlock screen locker"
-print_msg "  ✓ Hypridle idle management"
 print_msg "  ✓ Wlogout logout menu"
 print_msg "  ✓ All necessary utilities"
 print_msg ""
@@ -1403,7 +1458,7 @@ print_msg "  SUPER + G             - Toggle group"
 print_msg "  SUPER + 1-10          - Switch workspace"
 print_msg "  SUPER + SHIFT + 1-10  - Move to workspace"
 print_msg "  SUPER + C             - Clipboard history"
-print_msg "  SUPER + SHIFT + C     - Color picker"
+print_msg "  SUPER + SHIFT + C     - Color picker (hyprpicker)"
 print_msg "  SUPER + F9            - Screen recording"
 print_msg "  Print                 - Screenshot area"
 print_msg "  SHIFT + Print         - Screenshot screen"
