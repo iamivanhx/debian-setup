@@ -8,26 +8,29 @@
 #    sudo ./debian13-postinstall-ser8.sh
 #
 #  What this script does:
-#    1.  System update & essential base packages
-#    2.  AMD GPU / RDNA3 driver & firmware (780M iGPU)
-#    3.  CPU microcode & power-management tuning (Ryzen 7 8845HS)
-#    4.  Kernel parameters optimised for AMD Zen 4
-#    5.  Thermal & fan control (fwupd, thermald, sensors)
-#    6.  NVMe optimisations (I/O scheduler, power policy)
-#    7.  Wi-Fi & Bluetooth firmware (Intel AX200/AX210 common on SER8)
-#    8.  Audio (PipeWire + WirePlumber)
-#    9.  Flatpak + Flathub
-#   10.  Optional desktop extras (Firefox, VLC, GIMP, etc.)
-#   11.  Swappiness & memory tuning for mini-PC workloads
-#   12.  Security hardening (UFW, fail2ban)
-#   13.  Developer tools (optional)
-#   14.  Gaming optimisations (optional)
-#   15.  Hardware video acceleration
-#   16.  System services tuning
-#   17.  Desktop environment extras
-#   18.  zsh + Oh My Zsh + Starship (Gruvbox Rainbow) + Nerd Font
-#   19.  Gaming optimisations (optional)
-#   20.  Final cleanup & reboot prompt
+#    1.  APT sources (main + backports) & system update
+#    2.  Backported kernel (latest linux-image from trixie-backports)
+#    3.  Minimal GNOME desktop (GDM3 + core Shell, no bloat)
+#    4.  Essential base packages
+#    5.  AMD GPU / RDNA3 driver & firmware (780M iGPU)
+#    6.  CPU microcode & power-management tuning (Ryzen 7 8845HS)
+#    7.  Kernel parameters optimised for AMD Zen 4
+#    8.  NVMe optimisations (I/O scheduler, power policy)
+#    9.  Wi-Fi & Bluetooth firmware (Intel AX200/AX210 common on SER8)
+#   10.  Audio (PipeWire + WirePlumber)
+#   11.  Thermal sensors & monitoring
+#   12.  Memory / swap tuning for mini-PC workloads
+#   13.  Firmware update daemon (fwupd)
+#   14.  Security hardening (UFW, fail2ban)
+#   15.  Flatpak + Flathub
+#   16.  Optional desktop extras (Firefox, VLC, GIMP, etc.)
+#   17.  Optional developer tools
+#   18.  Hardware video acceleration
+#   19.  System services tuning
+#   20.  Desktop environment extras (GNOME tweaks)
+#   21.  zsh + Oh My Zsh + Starship (Gruvbox Rainbow) + Nerd Font
+#   22.  Ubuntu look & feel (Gruvbox Minimal GTK theme, Yaru base, Dash-to-Dock)
+#   23.  Final cleanup & reboot prompt
 #
 #  Tested against: Debian 13 "Trixie" (amd64)
 # =============================================================================
@@ -58,88 +61,403 @@ ask_yes_no() {
     [[ "${answer,,}" == "y" ]]
 }
 
+# ── Atomic config deployment (preserves existing configs with dated backup) ──
+# Usage: deploy_config "/path/to/target" << 'EOF'
+#          ...content...
+#        EOF
+deploy_config() {
+    local target="$1"
+    local parent_dir
+    parent_dir="$(dirname "$target")"
+    mkdir -p "$parent_dir"
+    if [[ -f "$target" ]]; then
+        local backup="${target}.bak.$(date +%Y%m%d_%H%M%S)"
+        cp "$target" "$backup"
+        info "Backed up ${target} → ${backup}"
+    fi
+    cat > "$target"
+}
+
+# ── Install packages with dry-run preflight check ────────────────────────────
+safe_install() {
+    local desc="$1"
+    shift
+    info "Installing: ${desc}..."
+    if ! apt-get install -y --dry-run "$@" &>/dev/null; then
+        warn "Preflight check flagged issues for: ${desc}. Attempting install anyway..."
+    fi
+    DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" \
+        -o Dpkg::Options::="--force-confdef" \
+        -o Dpkg::Options::="--force-confold" \
+        || warn "Some packages in '${desc}' could not be installed — continuing."
+    success "${desc} installed."
+}
+
+# ── Trap for unexpected exits ─────────────────────────────────────────────────
+LOGFILE="/var/log/debian13-postinstall-ser8.log"
+trap 'echo -e "${RED}[FATAL]${RST} Script exited unexpectedly at line ${LINENO}. Check: ${LOGFILE}" >&2' ERR
+
 # ── Root check ────────────────────────────────────────────────────────────────
 [[ $EUID -ne 0 ]] && error "Please run as root: sudo $0"
 
-# ── Debian 13 check ───────────────────────────────────────────────────────────
-if [[ -f /etc/os-release ]]; then
-    source /etc/os-release
-    if [[ "$VERSION_CODENAME" != "trixie" && "$VERSION_CODENAME" != "testing" ]]; then
-        warn "This script targets Debian 13 Trixie. Detected: ${VERSION_CODENAME}."
-        ask_yes_no "Continue anyway?" || exit 1
-    fi
-else
-    warn "Cannot detect OS version — proceeding anyway."
-fi
-
-LOGFILE="/var/log/debian13-postinstall-ser8.log"
+# ── Logging ───────────────────────────────────────────────────────────────────
 exec > >(tee -a "$LOGFILE") 2>&1
 info "Full log available at: $LOGFILE"
 
 # =============================================================================
-# STEP 1 — APT SOURCES & SYSTEM UPDATE
+# STEP 0 — OS DETECTION & HARDWARE FINGERPRINT
 # =============================================================================
-step "Step 1 — APT sources & system update"
+step "Step 0 — OS detection & hardware fingerprint"
 
-# Enable contrib and non-free repositories (needed for firmware)
-info "Configuring APT sources with contrib & non-free..."
-cat > /etc/apt/sources.list << 'EOF'
+# ── Distro check ─────────────────────────────────────────────────────────────
+if [[ -f /etc/os-release ]]; then
+    # shellcheck source=/dev/null
+    source /etc/os-release
+    DISTRO_CODENAME="${VERSION_CODENAME:-unknown}"
+    info "Detected OS: ${PRETTY_NAME:-unknown} (codename: ${DISTRO_CODENAME})"
+    if [[ "$DISTRO_CODENAME" != "trixie" && "$DISTRO_CODENAME" != "testing" ]]; then
+        warn "This script targets Debian 13 Trixie. Detected: ${DISTRO_CODENAME}."
+        warn "Some packages or paths may differ on your release."
+        ask_yes_no "Continue anyway?" || exit 1
+    fi
+else
+    warn "Cannot detect OS version (/etc/os-release missing) — proceeding anyway."
+    DISTRO_CODENAME="trixie"
+fi
+
+# ── Hardware detection ────────────────────────────────────────────────────────
+detect_hardware() {
+    info "Detecting hardware..."
+
+    CPU_MODEL=$(grep -m1 "model name" /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs || echo "unknown")
+    GPU_DEVICE=$(lspci 2>/dev/null | grep -i "vga\|display\|3d" | cut -d: -f3 | head -1 | xargs || echo "unknown")
+    NVME_DEVICES=$(lsblk -dno NAME,MODEL 2>/dev/null | grep -i nvme || echo "none detected")
+    RAM_GB=$(awk '/MemTotal/ {printf "%.0f", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo "?")
+
+    info "CPU  : ${CPU_MODEL}"
+    info "GPU  : ${GPU_DEVICE}"
+    info "NVMe : ${NVME_DEVICES}"
+    info "RAM  : ${RAM_GB} GB"
+
+    # Soft-warn on CPU/GPU mismatch (script still works, just may be suboptimal)
+    if [[ "$CPU_MODEL" != *"8845HS"* ]]; then
+        warn "CPU does not appear to be the Ryzen 7 8845HS — some tuning params may be suboptimal."
+    fi
+    if [[ "$GPU_DEVICE" != *"AMD"* && "$GPU_DEVICE" != *"Radeon"* && "$GPU_DEVICE" != *"ATI"* ]]; then
+        warn "AMD/Radeon GPU not detected — GPU-specific steps may be suboptimal."
+    fi
+    if [[ -z "$(lsblk -dno NAME 2>/dev/null | grep nvme)" ]]; then
+        warn "No NVMe device detected — NVMe tuning will still be applied but may have no effect."
+    fi
+}
+detect_hardware
+
+# ── Determine real user early (reused across steps) ───────────────────────────
+if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    REAL_USER="$SUDO_USER"
+    REAL_HOME="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
+else
+    REAL_USER="root"
+    REAL_HOME="/root"
+fi
+info "Target user for shell/theme config: ${REAL_USER} (home: ${REAL_HOME})"
+
+# =============================================================================
+# STEP 1 — APT SOURCES (main + backports) & SYSTEM UPDATE
+# =============================================================================
+step "Step 1 — APT sources (main + backports) & system update"
+
+info "Configuring APT sources with contrib, non-free & backports..."
+deploy_config /etc/apt/sources.list << EOF
 # Debian 13 Trixie — Main, Contrib, Non-Free, Non-Free-Firmware
-deb http://deb.debian.org/debian trixie main contrib non-free non-free-firmware
-deb-src http://deb.debian.org/debian trixie main contrib non-free non-free-firmware
+deb http://deb.debian.org/debian ${DISTRO_CODENAME} main contrib non-free non-free-firmware
+deb-src http://deb.debian.org/debian ${DISTRO_CODENAME} main contrib non-free non-free-firmware
 
 # Security updates
-deb http://security.debian.org/debian-security trixie-security main contrib non-free non-free-firmware
-deb-src http://security.debian.org/debian-security trixie-security main contrib non-free non-free-firmware
+deb http://security.debian.org/debian-security ${DISTRO_CODENAME}-security main contrib non-free non-free-firmware
+deb-src http://security.debian.org/debian-security ${DISTRO_CODENAME}-security main contrib non-free non-free-firmware
 
-# Trixie updates
-deb http://deb.debian.org/debian trixie-updates main contrib non-free non-free-firmware
-deb-src http://deb.debian.org/debian trixie-updates main contrib non-free non-free-firmware
+# Updates
+deb http://deb.debian.org/debian ${DISTRO_CODENAME}-updates main contrib non-free non-free-firmware
+deb-src http://deb.debian.org/debian ${DISTRO_CODENAME}-updates main contrib non-free non-free-firmware
+
+# Backports — latest kernels, Mesa, firmware, and other updated packages.
+# Packages here are NOT installed automatically; use -t ${DISTRO_CODENAME}-backports
+# or the explicit pin in /etc/apt/preferences.d/. Only the kernel (Step 2) pulls
+# from here by default.
+deb http://deb.debian.org/debian ${DISTRO_CODENAME}-backports main contrib non-free non-free-firmware
+deb-src http://deb.debian.org/debian ${DISTRO_CODENAME}-backports main contrib non-free non-free-firmware
 EOF
 
-info "Running apt update + full upgrade..."
+# Pin backports at low priority (200) so regular upgrades never pull them in.
+# Individual packages that should come from backports are targeted explicitly
+# with -t ${DISTRO_CODENAME}-backports at install time.
+deploy_config /etc/apt/preferences.d/99-backports-pin << EOF
+Package: *
+Pin: release a=${DISTRO_CODENAME}-backports
+Pin-Priority: 200
+EOF
+
+info "Running single coordinated apt update + full upgrade..."
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y \
     -o Dpkg::Options::="--force-confdef" \
     -o Dpkg::Options::="--force-confold"
-
-success "System updated."
+success "System updated. Backports repo enabled (pinned at priority 200)."
 
 # =============================================================================
-# STEP 2 — ESSENTIAL BASE PACKAGES
+# STEP 2 — BACKPORTED KERNEL (latest linux-image from trixie-backports)
 # =============================================================================
-step "Step 2 — Essential base packages"
+step "Step 2 — Backported kernel installation"
 
-BASE_PKGS=(
-    # Core utilities
+# Why backports?
+#   The Ryzen 7 8845HS (Zen 4 / Phoenix) and the Radeon 780M (RDNA 3 / GFX1103)
+#   benefit significantly from newer kernels: improved amd_pstate CPPC support,
+#   better firmware-loading paths for the 780M, upstream DRM/amdgpu fixes, and
+#   newer power-management patches that land in mainline well before Trixie stable.
+#
+# Strategy:
+#   1. Query which linux-image-amd64 version is available in backports.
+#   2. Install that meta-package (+ matching headers) with -t backports.
+#   3. Also pull firmware-amd-graphics from backports — it ships newer GPU blobs
+#      that the backported kernel may need.
+#   4. Pin the installed kernel so future unattended-upgrades won't downgrade it.
+#   5. Regenerate GRUB so the new kernel is the default entry.
+
+info "Querying latest kernel available in ${DISTRO_CODENAME}-backports..."
+
+# Resolve the exact version available in backports (e.g. 6.12.0+1~bpo13+1)
+BPO_KERNEL_VERSION=$(apt-cache policy linux-image-amd64 \
+    -t "${DISTRO_CODENAME}-backports" 2>/dev/null \
+    | grep "Candidate:" | awk '{print $2}')
+
+if [[ -z "$BPO_KERNEL_VERSION" || "$BPO_KERNEL_VERSION" == "(none)" ]]; then
+    warn "No backported kernel found in ${DISTRO_CODENAME}-backports — skipping kernel upgrade."
+    warn "Ensure the backports repo is reachable and run: apt-get update"
+else
+    info "Backported kernel candidate: linux-image-amd64 ${BPO_KERNEL_VERSION}"
+
+    # Install meta-package + headers from backports
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        -t "${DISTRO_CODENAME}-backports" \
+        -o Dpkg::Options::="--force-confdef" \
+        -o Dpkg::Options::="--force-confold" \
+        linux-image-amd64 \
+        linux-headers-amd64 \
+        linux-compiler-gcc-14-x86 \
+        firmware-amd-graphics
+    # linux-compiler-gcc-14-x86 ensures DKMS modules (e.g. VirtualBox, ZFS) can
+    # rebuild against the new headers without a toolchain mismatch.
+
+    # Pin the backported kernel meta-package so apt upgrade won't touch it.
+    # The pin uses the package name pattern; the meta-package handles version bumps.
+    deploy_config /etc/apt/preferences.d/98-backports-kernel << EOF
+# Keep linux-image-amd64 and linux-headers-amd64 on the backports track
+Package: linux-image-amd64 linux-headers-amd64 linux-compiler-gcc-14-x86
+Pin: release a=${DISTRO_CODENAME}-backports
+Pin-Priority: 900
+EOF
+
+    # Determine the concrete kernel version string that was just installed
+    # (e.g. "6.12.0-0.deb12.6+1") for the GRUB default entry.
+    INSTALLED_BPO_KERNEL=$(dpkg -l 'linux-image-[0-9]*' 2>/dev/null \
+        | awk '/^ii/ {print $2}' \
+        | sort -V | tail -1 \
+        | sed 's/linux-image-//')
+    info "Installed kernel version: ${INSTALLED_BPO_KERNEL:-<detecting after dpkg>}"
+
+    # Rebuild initramfs for the new kernel (update-initramfs is called by dpkg
+    # hooks, but we force it here to guarantee completion in non-interactive mode)
+    if [[ -n "$INSTALLED_BPO_KERNEL" ]]; then
+        update-initramfs -u -k "$INSTALLED_BPO_KERNEL" 2>/dev/null \
+            || warn "update-initramfs returned non-zero — check /var/log/kern.log after reboot."
+    fi
+
+    # Regenerate GRUB config so the new kernel appears first
+    update-grub 2>/dev/null || true
+
+    success "Backported kernel installed: ${INSTALLED_BPO_KERNEL:-linux-image-amd64 (latest)}."
+    info "  → The new kernel will be active after reboot (Step 23 offers a reboot prompt)."
+    info "  → To verify after reboot: uname -r"
+fi
+
+# =============================================================================
+# STEP 3 — MINIMAL GNOME DESKTOP
+# =============================================================================
+step "Step 3 — Minimal GNOME desktop installation"
+
+# Philosophy: install the smallest viable GNOME that gives a usable Wayland
+# session with GDM3, without pulling in the full gnome-core or task-gnome-desktop
+# bloat (LibreOffice, games, evolution, etc.).
+#
+# Package breakdown:
+#   gnome-shell          — the compositor/shell itself (Wayland + Mutter)
+#   gdm3                 — GNOME Display Manager (login screen)
+#   gnome-session        — session manager (needed to start gnome-shell properly)
+#   gnome-settings-daemon — background daemon for power, display, input settings
+#   gnome-control-center — Settings app (essential for usability)
+#   gnome-terminal       — default terminal (lightweight, integrates well)
+#   nautilus             — Files app (drag-and-drop, desktop icons integration)
+#   gnome-text-editor    — simple text editor (replaces gedit in GNOME 45+)
+#   gvfs gvfs-backends   — virtual filesystem (USB automount, network shares)
+#   xdg-utils            — xdg-open and MIME type handling
+#   xdg-user-dirs        — creates ~/Desktop, ~/Downloads, etc. on first login
+#   polkit               — authentication agent for privilege escalation
+#   network-manager      — Wi-Fi / Ethernet management (nm-applet in GNOME)
+#   network-manager-gnome — NM system tray applet
+#   gnome-keyring        — secrets/password manager integrated into GNOME
+#   gsettings-desktop-schemas — required GSettings schemas for desktop behaviour
+#   adwaita-icon-theme   — default GNOME icon set
+#   fonts-cantarell      — default GNOME UI font
+
+GNOME_MINIMAL_PKGS=(
+    # Core shell + session
+    gnome-shell
+    gnome-session
+    gnome-settings-daemon
+    gdm3
+    # Essential apps (minimal set — more added in later steps)
+    gnome-control-center
+    gnome-terminal
+    nautilus
+    gnome-text-editor
+    # System integration
+    gvfs
+    gvfs-backends
+    xdg-utils
+    xdg-user-dirs
+    xdg-user-dirs-gtk
+    polkit
+    polkit-gnome
+    # Networking
+    network-manager
+    network-manager-gnome
+    # Keyring / auth
+    gnome-keyring
+    libpam-gnome-keyring
+    # Schemas + themes + fonts
+    gsettings-desktop-schemas
+    adwaita-icon-theme
+    fonts-cantarell
+    # Accessibility (required for GNOME session to start cleanly)
+    at-spi2-core
+    # Wayland XDG portal (required for Flatpak, screen capture, file chooser)
+    xdg-desktop-portal
+    xdg-desktop-portal-gnome
+    # Dconf editor backend
+    dconf-cli
+)
+
+info "Installing minimal GNOME packages..."
+DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    -o Dpkg::Options::="--force-confdef" \
+    -o Dpkg::Options::="--force-confold" \
+    "${GNOME_MINIMAL_PKGS[@]}" \
+    || warn "One or more GNOME packages could not be installed — check apt output above."
+
+# Enable GDM3 as the default display manager
+info "Enabling GDM3 display manager..."
+# Debconf pre-answer to avoid interactive DM selection dialog
+echo "/usr/sbin/gdm3" > /etc/X11/default-display-manager
+DEBIAN_FRONTEND=noninteractive dpkg-reconfigure gdm3 2>/dev/null || true
+systemctl enable gdm3.service
+systemctl set-default graphical.target
+
+# Enable NetworkManager (replaces ifupdown for desktop use)
+info "Enabling NetworkManager..."
+systemctl enable NetworkManager.service
+
+# Disable ifupdown management of the primary interface so NM takes over.
+# We only disable managed=false if the file already exists from a base install.
+NM_CONF="/etc/NetworkManager/NetworkManager.conf"
+if [[ -f "$NM_CONF" ]]; then
+    if grep -q "managed=false" "$NM_CONF"; then
+        sed -i 's/managed=false/managed=true/' "$NM_CONF"
+        info "NetworkManager: set managed=true for desktop interfaces."
+    fi
+fi
+
+# Create a NetworkManager config that manages all Ethernet/Wi-Fi interfaces
+deploy_config /etc/NetworkManager/conf.d/10-managed.conf << 'EOF'
+[main]
+# Let NetworkManager manage all interfaces (desktop mode)
+plugins=ifupdown,keyfile
+
+[ifupdown]
+managed=true
+EOF
+
+# Disable /etc/network/interfaces management of non-loopback interfaces
+# to prevent conflicts between ifupdown and NetworkManager
+if [[ -f /etc/network/interfaces ]]; then
+    # Back up and leave only the loopback entry
+    cp /etc/network/interfaces /etc/network/interfaces.bak_preNM
+    deploy_config /etc/network/interfaces << 'EOF'
+# This file intentionally left minimal.
+# NetworkManager manages all interfaces (see /etc/NetworkManager/).
+# Loopback is still managed here as required.
+auto lo
+iface lo inet loopback
+EOF
+    info "Reduced /etc/network/interfaces to loopback-only (NM handles the rest)."
+fi
+
+# XDG user directories — create them now for the real user
+if [[ "$REAL_USER" != "root" ]]; then
+    sudo -u "$REAL_USER" xdg-user-dirs-update 2>/dev/null || true
+    info "XDG user directories created for ${REAL_USER}."
+fi
+
+success "Step 3 complete — minimal GNOME desktop installed."
+info "  → GDM3 set as default display manager."
+info "  → Boot target: graphical.target (GUI login on next reboot)."
+info "  → NetworkManager will manage Wi-Fi and Ethernet after reboot."
+warn "  → Do NOT reboot yet — hardware drivers and audio are installed in later steps."
+
+# =============================================================================
+# STEP 4 — ESSENTIAL BASE PACKAGES
+# =============================================================================
+step "Step 4 — Essential base packages"
+
+BASE_ESSENTIAL=(
     curl wget git vim nano htop btop fastfetch
     build-essential cmake pkg-config
     apt-transport-https ca-certificates gnupg lsb-release
-    # Archive tools
+)
+BASE_ARCHIVE=(
     zip unzip p7zip-full tar gzip bzip2 xz-utils zstd
-    # Filesystem
+)
+BASE_FILESYSTEM=(
     ntfs-3g exfatprogs dosfstools btrfs-progs
-    # Network
+)
+BASE_NETWORK=(
     net-tools iproute2 iw rfkill openssh-client
     nmap traceroute iputils-ping dnsutils
-    # Hardware info
+)
+BASE_HWINFO=(
     lshw hwinfo pciutils usbutils dmidecode inxi
-    # Monitoring
+)
+BASE_MONITOR=(
     iotop iftop powertop nvtop sysstat
-    # Misc
+)
+BASE_MISC=(
     bash-completion command-not-found software-properties-common
     python3 python3-pip python3-venv
     jq tree tmux screen fzf ripgrep fd-find bat
 )
 
-info "Installing base packages..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y "${BASE_PKGS[@]}"
-success "Base packages installed."
+safe_install "core utilities"      "${BASE_ESSENTIAL[@]}"
+safe_install "archive tools"       "${BASE_ARCHIVE[@]}"
+safe_install "filesystem tools"    "${BASE_FILESYSTEM[@]}"
+safe_install "network tools"       "${BASE_NETWORK[@]}"
+safe_install "hardware info tools" "${BASE_HWINFO[@]}"
+safe_install "monitoring tools"    "${BASE_MONITOR[@]}"
+safe_install "misc utilities"      "${BASE_MISC[@]}"
 
 # =============================================================================
-# STEP 3 — AMD GPU DRIVER & FIRMWARE (Radeon 780M / RDNA 3)
+# STEP 5 — AMD GPU DRIVER & FIRMWARE (Radeon 780M / RDNA 3)
 # =============================================================================
-step "Step 3 — AMD GPU firmware & drivers (Radeon 780M / RDNA 3)"
+step "Step 5 — AMD GPU firmware & drivers (Radeon 780M / RDNA 3)"
 
 AMD_GPU_PKGS=(
     firmware-amd-graphics       # Radeon 780M iGPU firmware blobs
@@ -150,22 +468,20 @@ AMD_GPU_PKGS=(
     libva-utils                 # vainfo tool
     vulkan-tools                # vulkaninfo tool
     radeontop                   # GPU monitoring
-    rocm-smi                    # ROCm system management CLI (binary pkg name in Trixie)
+    rocm-smi                    # ROCm system management CLI
 )
 
-info "Installing AMD GPU firmware and Mesa drivers..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y "${AMD_GPU_PKGS[@]}" || \
-    warn "Some AMD GPU packages may not be available in current repos — skipping missing ones."
+safe_install "AMD GPU firmware and Mesa drivers" "${AMD_GPU_PKGS[@]}"
 
 # Ensure amdgpu kernel module is loaded at boot
-if ! grep -q "amdgpu" /etc/modules; then
+if ! grep -q "^amdgpu" /etc/modules; then
     echo "amdgpu" >> /etc/modules
     info "Added amdgpu to /etc/modules."
 fi
 
 # Wayland: ensure GBM backend is preferred for AMD
 mkdir -p /etc/environment.d
-cat > /etc/environment.d/80-amd-wayland.conf << 'EOF'
+deploy_config /etc/environment.d/80-amd-wayland.conf << 'EOF'
 # Force AMD GBM backend for Wayland compositors
 GBM_BACKEND=amdgpu
 __GLX_VENDOR_LIBRARY_NAME=mesa
@@ -178,12 +494,11 @@ EOF
 success "AMD GPU drivers configured."
 
 # =============================================================================
-# STEP 4 — CPU MICROCODE & POWER MANAGEMENT (Ryzen 7 8845HS / Zen 4)
+# STEP 6 — CPU MICROCODE & POWER MANAGEMENT (Ryzen 7 8845HS / Zen 4)
 # =============================================================================
-step "Step 4 — AMD CPU microcode & power management"
+step "Step 6 — AMD CPU microcode & power management"
 
-info "Installing AMD microcode and power tools..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y \
+safe_install "AMD CPU power tools" \
     amd64-microcode \
     cpupower \
     linux-cpupower \
@@ -195,68 +510,66 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
 
 # cpupower — set governor to schedutil (best for Zen 4 with boost)
 info "Configuring CPU frequency scaling (schedutil governor)..."
-cat > /etc/default/cpupower << 'EOF'
+deploy_config /etc/default/cpupower << 'EOF'
 # CPU frequency governor for AMD Ryzen 7 8845HS (Zen 4)
 # schedutil: kernel-integrated, respects AMD boost correctly
 START_OPTS="--governor schedutil"
 STOP_OPTS=""
 EOF
 
-# Enable cpupower service
 systemctl enable cpupower.service 2>/dev/null || true
-
-# AMD P-State driver — enable for Ryzen 8000 series
-# amd_pstate=active gives the OS full P-State control (best efficiency)
-GRUB_CMDLINE_ADDITIONS="amd_pstate=active"
-
 success "CPU power management configured."
 
 # =============================================================================
-# STEP 5 — KERNEL PARAMETERS (GRUB)
+# STEP 7 — KERNEL PARAMETERS (GRUB)
 # =============================================================================
-step "Step 5 — Kernel parameters (GRUB)"
+step "Step 7 — Kernel parameters (GRUB)"
 
 GRUB_FILE="/etc/default/grub"
+
+# Kernel cmdline params for Ryzen 7 8845HS + SER8:
+#   amd_pstate=active  : Active P-State driver (Zen 4 native CPPC)
+#   idle=nomwait       : Prevent mwait C-state issues on some BIOSes
+#   nowatchdog         : Disable NMI watchdog (saves ~1 CPU wake/sec)
+#   loglevel=3         : Quiet boot (suppress non-critical kernel messages)
+#   mitigations=auto   : Keep default Spectre/Meltdown mitigations
+KERNEL_PARAMS="amd_pstate=active idle=nomwait nowatchdog loglevel=3 mitigations=auto"
 
 if [[ -f "$GRUB_FILE" ]]; then
     info "Backing up GRUB config..."
     cp "$GRUB_FILE" "${GRUB_FILE}.bak_$(date +%Y%m%d_%H%M%S)"
 
-    # Build optimised kernel cmdline for Ryzen 7 8845HS + SER8
-    # ─ amd_pstate=active      : Active P-State driver (Zen 4 native)
-    # ─ amd_iommu=off          : Disable IOMMU if not using VMs (lower latency)
-    # ─ idle=nomwait           : Prevent mwait C-state issues on some BIOSes
-    # ─ pcie_aspm=off          : Avoid NVMe/PCIe ASPM quirks on Beelink firmware
-    # ─ mitigations=auto       : Keep default Spectre/Meltdown mitigations
-    # ─ loglevel=3             : Quiet boot
-    # ─ nowatchdog             : Disable NMI watchdog (saves ~1 CPU wake/sec)
-    NEW_CMDLINE='GRUB_CMDLINE_LINUX_DEFAULT="quiet splash amd_pstate=active idle=nomwait nowatchdog loglevel=3 mitigations=auto"'
+    # Safe replacement: build the full line, then replace atomically
+    NEW_CMDLINE="GRUB_CMDLINE_LINUX_DEFAULT=\"quiet splash ${KERNEL_PARAMS}\""
 
     if grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=' "$GRUB_FILE"; then
-        sed -i "s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|${NEW_CMDLINE}|" "$GRUB_FILE"
+        # Use | as delimiter to avoid issues with spaces and slashes in the value
+        sed -i.bak "s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|${NEW_CMDLINE}|" "$GRUB_FILE"
     else
         echo "$NEW_CMDLINE" >> "$GRUB_FILE"
     fi
 
-    # Enable GRUB timeout (useful for dual-boot)
-    sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=5/' "$GRUB_FILE"
+    # Enable GRUB timeout (useful for dual-boot; harmless otherwise)
+    if grep -q '^GRUB_TIMEOUT=' "$GRUB_FILE"; then
+        sed -i 's|^GRUB_TIMEOUT=.*|GRUB_TIMEOUT=5|' "$GRUB_FILE"
+    else
+        echo "GRUB_TIMEOUT=5" >> "$GRUB_FILE"
+    fi
 
     info "Updating GRUB..."
     update-grub
     success "Kernel parameters updated."
 else
-    warn "GRUB config not found at ${GRUB_FILE} — skipping."
+    warn "GRUB config not found at ${GRUB_FILE} — skipping. (systemd-boot or other bootloader?)"
 fi
 
 # =============================================================================
-# STEP 6 — NVMe OPTIMISATION
+# STEP 8 — NVMe OPTIMISATION
 # =============================================================================
-step "Step 6 — NVMe I/O optimisation"
+step "Step 8 — NVMe I/O optimisation"
 
 info "Configuring NVMe I/O scheduler and power policy..."
-
-# Use mq-deadline scheduler for NVMe (best latency/throughput balance)
-cat > /etc/udev/rules.d/60-nvme-ioscheduler.rules << 'EOF'
+deploy_config /etc/udev/rules.d/60-nvme-ioscheduler.rules << 'EOF'
 # I/O scheduler for NVMe SSDs — mq-deadline balances latency & throughput
 ACTION=="add|change", KERNEL=="nvme[0-9]*", ATTR{queue/scheduler}="mq-deadline"
 # Allow NVMe autonomous power state transitions (APST) — saves ~0.5–1W idle
@@ -266,107 +579,85 @@ EOF
 # Trim: enable weekly fstrim timer
 systemctl enable fstrim.timer
 systemctl start fstrim.timer
-
 success "NVMe optimisations applied."
 
 # =============================================================================
-# STEP 7 — WI-FI & BLUETOOTH FIRMWARE
+# STEP 9 — WI-FI & BLUETOOTH FIRMWARE
 # =============================================================================
-step "Step 7 — Wi-Fi & Bluetooth firmware"
+step "Step 9 — Wi-Fi & Bluetooth firmware"
 
-WIFI_PKGS=(
-    firmware-iwlwifi          # Intel AX200/AX210 (most common in SER8)
-    firmware-realtek          # Fallback: some SER8 variants use Realtek
-    firmware-atheros          # Fallback: Atheros adapters
-    wireless-tools
-    wpasupplicant
-    rfkill
-    bluetooth
-    bluez
+safe_install "Wi-Fi & Bluetooth firmware" \
+    firmware-iwlwifi \
+    firmware-realtek \
+    firmware-atheros \
+    wireless-tools \
+    wpasupplicant \
+    rfkill \
+    bluetooth \
+    bluez \
     bluez-tools
-    # Note: BT audio is handled by libspa-0.2-bluetooth (installed in PipeWire step)
-)
 
-info "Installing Wi-Fi & Bluetooth firmware..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y "${WIFI_PKGS[@]}" || \
-    warn "Some wireless firmware packages unavailable — check manually."
-
-# Enable Bluetooth service
 systemctl enable bluetooth.service
 systemctl start bluetooth.service
-
 success "Wi-Fi & Bluetooth firmware installed."
 
 # =============================================================================
-# STEP 8 — AUDIO (PipeWire + WirePlumber)
+# STEP 10 — AUDIO (PipeWire + WirePlumber)
 # =============================================================================
-step "Step 8 — PipeWire audio stack"
+step "Step 10 — PipeWire audio stack"
 
-AUDIO_PKGS=(
-    pipewire
-    pipewire-alsa
-    pipewire-audio
-    pipewire-jack
-    pipewire-pulse
-    wireplumber
-    libspa-0.2-bluetooth
-    libspa-0.2-jack
-    gstreamer1.0-pipewire
-    pavucontrol              # GUI volume control
-    alsa-utils
-    alsa-firmware-loaders
-    sof-firmware             # Sound Open Firmware (needed for AMD SOF audio)
-    # Note: pulseaudio-module-bluetooth is NOT installed — PipeWire handles BT
-    # directly via libspa-0.2-bluetooth. Mixing PulseAudio modules with PipeWire
-    # causes conflicts in Trixie.
-)
+# Note: pulseaudio-module-bluetooth is NOT installed — PipeWire handles BT
+# directly via libspa-0.2-bluetooth. Mixing PulseAudio modules with PipeWire
+# causes conflicts in Trixie.
+safe_install "PipeWire audio stack" \
+    pipewire \
+    pipewire-alsa \
+    pipewire-audio \
+    pipewire-jack \
+    pipewire-pulse \
+    wireplumber \
+    libspa-0.2-bluetooth \
+    libspa-0.2-jack \
+    gstreamer1.0-pipewire \
+    pavucontrol \
+    alsa-utils \
+    alsa-firmware-loaders \
+    sof-firmware
 
-info "Installing PipeWire audio stack..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y "${AUDIO_PKGS[@]}"
-
-# The Ryzen 8845HS uses SOF (Sound Open Firmware) for audio — ensure loaded
-if ! grep -q "snd_sof" /etc/modules; then
-    echo "snd_sof_pci_intel_cnl" >> /etc/modules 2>/dev/null || true
-    echo "snd_sof_amd_acp" >> /etc/modules 2>/dev/null || true
+# The Ryzen 8845HS uses SOF (Sound Open Firmware) for audio
+if ! grep -q "snd_sof_amd_acp" /etc/modules 2>/dev/null; then
+    echo "snd_sof_amd_acp" >> /etc/modules
 fi
 
 success "PipeWire audio stack installed."
 
 # =============================================================================
-# STEP 9 — THERMAL SENSORS & MONITORING
+# STEP 11 — THERMAL SENSORS & MONITORING
 # =============================================================================
-step "Step 9 — Thermal sensors & hardware monitoring"
+step "Step 11 — Thermal sensors & hardware monitoring"
 
-info "Detecting sensors..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y \
+safe_install "thermal monitoring tools" \
     lm-sensors \
     fancontrol \
     i2c-tools \
     stress-ng
-    # Note: s-tui is not in Trixie stable repos; install via pip3: pip3 install s-tui
 
-# Autodetect sensor modules
+# Autodetect sensor modules (suppress prompts with --auto)
 sensors-detect --auto > /dev/null 2>&1 || true
-
 success "Thermal monitoring tools installed. Run 'sensors' to check temps."
 
 # =============================================================================
-# STEP 10 — MEMORY / SWAP TUNING
+# STEP 12 — MEMORY / SWAP TUNING
 # =============================================================================
-step "Step 10 — Memory & swap tuning"
+step "Step 12 — Memory & swap tuning"
 
 info "Applying sysctl optimisations for mini-PC workloads..."
-
-cat > /etc/sysctl.d/99-ser8-tuning.conf << 'EOF'
+deploy_config /etc/sysctl.d/99-ser8-tuning.conf << 'EOF'
 # ── Memory management ─────────────────────────────────────────────────────
 # Lower swappiness — keep more data in RAM (SER8 has 32/64GB DDR5)
 vm.swappiness = 10
-
-# Increase dirty page cache pressure tolerance
 vm.dirty_ratio = 15
 vm.dirty_background_ratio = 5
-
-# Reduce memory overcommit aggressiveness
 vm.overcommit_memory = 1
 
 # ── Network performance ───────────────────────────────────────────────────
@@ -395,9 +686,9 @@ success "Sysctl tuning applied."
 
 # zram swap (better than a swap file for systems with ample RAM)
 info "Setting up zram swap..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y zram-tools
+safe_install "zram swap" zram-tools
 
-cat > /etc/default/zramswap << 'EOF'
+deploy_config /etc/default/zramswap << 'EOF'
 # zram — compressed swap in RAM (good for Ryzen 8845HS w/ fast DDR5)
 ALGO=zstd
 PERCENT=25
@@ -406,38 +697,36 @@ EOF
 
 systemctl enable zramswap.service
 systemctl restart zramswap.service || true
-
 success "zram swap configured (25% of RAM, zstd compression)."
 
 # =============================================================================
-# STEP 11 — FIRMWARE UPDATE (fwupd)
+# STEP 13 — FIRMWARE UPDATE (fwupd)
 # =============================================================================
-step "Step 11 — Firmware update daemon (fwupd)"
+step "Step 13 — Firmware update daemon (fwupd)"
 
-DEBIAN_FRONTEND=noninteractive apt-get install -y fwupd
+safe_install "fwupd" fwupd
 
 info "Refreshing firmware metadata..."
-fwupdmgr refresh --force 2>/dev/null || warn "fwupd metadata refresh failed (no internet or no updates)."
+fwupdmgr refresh --force 2>/dev/null \
+    || warn "fwupd metadata refresh failed (no internet or no updates available)."
 
 info "To check for firmware updates later, run: fwupdmgr get-updates && fwupdmgr update"
 success "fwupd installed."
 
 # =============================================================================
-# STEP 12 — SECURITY HARDENING
+# STEP 14 — SECURITY HARDENING
 # =============================================================================
-step "Step 12 — Basic security hardening"
+step "Step 14 — Basic security hardening"
 
-info "Installing UFW firewall..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y ufw fail2ban
+safe_install "firewall & intrusion prevention" ufw fail2ban
 
-# UFW — sensible defaults
+# UFW — sensible defaults for a mini-PC (no exposed services by default)
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow ssh comment "SSH access"
 ufw --force enable
 
-info "Configuring fail2ban..."
-cat > /etc/fail2ban/jail.local << 'EOF'
+deploy_config /etc/fail2ban/jail.local << 'EOF'
 [DEFAULT]
 bantime  = 3600
 findtime = 600
@@ -451,179 +740,137 @@ EOF
 
 systemctl enable fail2ban
 systemctl restart fail2ban
-
 success "UFW + fail2ban configured."
 
 # =============================================================================
-# STEP 13 — FLATPAK & FLATHUB
+# STEP 15 — FLATPAK & FLATHUB
 # =============================================================================
-step "Step 13 — Flatpak + Flathub"
+step "Step 15 — Flatpak + Flathub"
 
-DEBIAN_FRONTEND=noninteractive apt-get install -y flatpak
+safe_install "Flatpak" flatpak
 
 info "Adding Flathub remote..."
 flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
-# If GNOME is installed, add gnome-software-plugin-flatpak
+# GNOME Software integration (optional, silently skip if unavailable)
 DEBIAN_FRONTEND=noninteractive apt-get install -y gnome-software-plugin-flatpak 2>/dev/null || true
-
 success "Flatpak + Flathub configured."
 
 # =============================================================================
-# STEP 14 — OPTIONAL: DESKTOP APPLICATIONS
+# STEP 16 — OPTIONAL: DESKTOP APPLICATIONS
 # =============================================================================
-step "Step 14 — Optional desktop applications"
+step "Step 16 — Optional desktop applications"
 
-if ask_yes_no "Install common desktop apps (Firefox, VLC, GIMP, LibreOffice, Thunderbird)?"; then
-    DESKTOP_PKGS=(
-        firefox-esr
-        vlc
-        # gimp
-        # libreoffice
-        # thunderbird
-        # gedit
-        gnome-tweaks
-        gparted
-        timeshift
-        copyq           # clipboard manager
-        flameshot       # screenshot tool
-    )
-    DEBIAN_FRONTEND=noninteractive apt-get install -y "${DESKTOP_PKGS[@]}" || \
-        warn "Some desktop packages could not be installed."
-    success "Desktop applications installed."
+if ask_yes_no "Install common desktop apps (Firefox, VLC, GIMP, gnome-tweaks, etc.)?"; then
+    safe_install "common desktop apps" \
+        firefox-esr \
+        vlc \
+        gnome-tweaks \
+        gparted \
+        timeshift \
+        copyq \
+        flameshot
 fi
 
 # ── Google Chrome ─────────────────────────────────────────────────────────────
-if command -v google-chrome &>/dev/null; then
-    log "Google Chrome already installed."
-else
-    info "Downloading Google Chrome..."
-    TMP_DEB=$(mktemp /tmp/chrome-XXXXXX.deb)
-    curl -fsSL "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb" -o "$TMP_DEB"
-    apt-get install -y -qq "$TMP_DEB"
-    rm -f "$TMP_DEB"
-    log "Google Chrome installed."
+if ask_yes_no "Install Google Chrome?"; then
+    if command -v google-chrome &>/dev/null; then
+        info "Google Chrome already installed — skipping."
+    else
+        info "Downloading Google Chrome..."
+        TMP_DEB=$(mktemp /tmp/chrome-XXXXXX.deb)
+        curl -fsSL \
+            --connect-timeout 30 \
+            --retry 3 \
+            --retry-delay 5 \
+            "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb" \
+            -o "$TMP_DEB"
+        DEBIAN_FRONTEND=noninteractive apt-get install -y "$TMP_DEB"
+        rm -f "$TMP_DEB"
+        success "Google Chrome installed."
+    fi
 fi
 
 # =============================================================================
-# STEP 15 — OPTIONAL: DEVELOPER TOOLS
+# STEP 17 — OPTIONAL: DEVELOPER TOOLS
 # =============================================================================
-step "Step 15 — Optional developer tools"
+step "Step 17 — Optional developer tools"
 
-if ask_yes_no "Install developer tools (Docker, VS Code, Node.js, Go)?"; then
-
-    # Docker CE
-    # info "Installing Docker..."
-    # install -m 0755 -d /etc/apt/keyrings
-    # curl -fsSL https://download.docker.com/linux/debian/gpg \
-    #     | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    # chmod a+r /etc/apt/keyrings/docker.gpg
-    # echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] \
-    #     https://download.docker.com/linux/debian trixie stable" \
-    #     > /etc/apt/sources.list.d/docker.list
-    # apt-get update -qq
-    # DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    #     docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-    # systemctl enable docker
-    # if [[ -n "${SUDO_USER:-}" ]]; then
-    #     usermod -aG docker "$SUDO_USER"
-    #     info "Added $SUDO_USER to docker group."
-    # fi
+if ask_yes_no "Install developer tools (VS Code, Node.js LTS, Go)?"; then
 
     # VS Code
-    info "Installing Visual Studio Code..."
+    info "Adding Microsoft APT repository for VS Code..."
+    install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
         | gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg
-    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] \
-        https://packages.microsoft.com/repos/code stable main" \
-        > /etc/apt/sources.list.d/vscode.list
+    deploy_config /etc/apt/sources.list.d/vscode.list << 'EOF'
+deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/code stable main
+EOF
     apt-get update -qq
-    DEBIAN_FRONTEND=noninteractive apt-get install -y code
+    safe_install "Visual Studio Code" code
 
     # Node.js LTS (via NodeSource)
-    info "Installing Node.js LTS..."
+    info "Adding NodeSource repository (LTS)..."
     curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - > /dev/null
-    DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
+    safe_install "Node.js LTS" nodejs
 
-    # Go
-    info "Installing Go..."
-    DEBIAN_FRONTEND=noninteractive apt-get install -y golang
+    # Go (from Debian repos — latest stable is usually up-to-date in Trixie)
+    safe_install "Go language" golang
 
     success "Developer tools installed."
 fi
 
 # =============================================================================
-# STEP 16 — OPTIONAL: GAMING OPTIMISATIONS
+# STEP 18 — OPTIONAL: GAMING OPTIMISATIONS (commented out by default)
 # =============================================================================
-# step "Step 16 — Optional gaming optimisations"
-
-# if ask_yes_no "Install gaming optimisations (Steam, Lutris, MangoHud, GameMode, Proton)?"; then
-
-#     # Enable i386 architecture for Steam
+# Uncomment this entire block to enable gaming support.
+#
+# step "Step 18 — Optional gaming optimisations"
+# if ask_yes_no "Install gaming support (Steam, Lutris, MangoHud, GameMode, Proton)?"; then
 #     dpkg --add-architecture i386
 #     apt-get update -qq
-
-#     GAMING_PKGS=(
-#         steam
-#         lutris
-#         mangohud
-#         gamemode
-#         gamescope
-#         libgamemode0
-#         libgamemodeauto0
-#         # Vulkan extras
-#         mesa-vulkan-drivers:i386
-#         libvulkan1
-#         libvulkan1:i386
+#     safe_install "gaming packages" \
+#         steam lutris mangohud gamemode gamescope \
+#         libgamemode0 libgamemodeauto0 \
+#         mesa-vulkan-drivers:i386 \
+#         libvulkan1 libvulkan1:i386 \
 #         vulkan-validationlayers
-#     )
-
-#     DEBIAN_FRONTEND=noninteractive apt-get install -y "${GAMING_PKGS[@]}" || \
-#         warn "Some gaming packages unavailable — check manually."
-
-#     # GameMode service
+#
 #     systemctl --user enable gamemoded 2>/dev/null || true
-
-#     # Increase max open files for games
+#
 #     cat >> /etc/security/limits.conf << 'EOF'
 # # Gaming: increase file descriptor limits
 # *    soft nofile 524288
 # *    hard nofile 524288
 # EOF
-
 #     success "Gaming packages installed."
-#     info "For best gaming performance on Radeon 780M, use: gamemoderun %command% in Steam launch options."
+#     info "Steam launch option: gamemoderun %command%"
 # fi
 
 # =============================================================================
-# STEP 17 — HARDWARE VIDEO ACCELERATION VERIFICATION
+# STEP 19 — HARDWARE VIDEO ACCELERATION VERIFICATION
 # =============================================================================
-step "Step 17 — Hardware video acceleration"
+step "Step 19 — Hardware video acceleration"
 
-VAAPI_PKGS=(
-    mesa-va-drivers
-    libva-utils
-    gstreamer1.0-vaapi
-    ffmpeg
-    mpv                        # Hardware-accelerated media player
-)
-
-info "Installing VA-API and hardware video decode tools..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y "${VAAPI_PKGS[@]}"
+safe_install "VA-API and hardware video decode" \
+    mesa-va-drivers \
+    libva-utils \
+    gstreamer1.0-vaapi \
+    ffmpeg \
+    mpv
 
 info "Verifying VA-API support (AMD 780M)..."
-vainfo 2>/dev/null || warn "vainfo check deferred — run manually after reboot."
-
+vainfo 2>/dev/null || warn "vainfo check deferred — run manually after reboot: vainfo"
 success "Hardware video acceleration configured."
 
 # =============================================================================
-# STEP 18 — SYSTEM SERVICES TUNING
+# STEP 20 — SYSTEM SERVICES TUNING
 # =============================================================================
-step "Step 18 — Systemd & journald tuning"
+step "Step 20 — Systemd & journald tuning"
 
 info "Tuning journald logging..."
 mkdir -p /etc/systemd/journald.conf.d
-cat > /etc/systemd/journald.conf.d/99-ser8.conf << 'EOF'
+deploy_config /etc/systemd/journald.conf.d/99-ser8.conf << 'EOF'
 [Journal]
 # Cap journal size to 500MB
 SystemMaxUse=500M
@@ -635,17 +882,15 @@ EOF
 
 info "Disabling rarely needed services on a mini-PC..."
 DISABLE_SERVICES=(
-    ModemManager.service           # No cellular modem
-    avahi-daemon.service           # Optional: mDNS (disable if not needed)
-    whoopsie.service               # Ubuntu crash reporter (may not exist)
+    ModemManager.service        # No cellular modem
+    avahi-daemon.service        # mDNS (disable if not needed on local network)
 )
 for svc in "${DISABLE_SERVICES[@]}"; do
     systemctl disable "$svc" 2>/dev/null && info "Disabled: $svc" || true
 done
 
-# Reduce systemd timeout
 mkdir -p /etc/systemd/system.conf.d
-cat > /etc/systemd/system.conf.d/99-timeouts.conf << 'EOF'
+deploy_config /etc/systemd/system.conf.d/99-timeouts.conf << 'EOF'
 [Manager]
 DefaultTimeoutStopSec=15s
 DefaultTimeoutStartSec=30s
@@ -655,9 +900,9 @@ systemctl daemon-reload
 success "Systemd tuning applied."
 
 # =============================================================================
-# STEP 19 — DESKTOP ENVIRONMENT EXTRAS (if GNOME detected)
+# STEP 21 — DESKTOP ENVIRONMENT EXTRAS (if GNOME detected)
 # =============================================================================
-step "Step 19 — Desktop environment tweaks"
+step "Step 21 — Desktop environment tweaks"
 
 if command -v gnome-shell &>/dev/null; then
     info "GNOME detected — applying GNOME-specific tweaks..."
@@ -667,15 +912,18 @@ if command -v gnome-shell &>/dev/null; then
         gnome-tweaks \
         dconf-editor \
         gnome-browser-connector 2>/dev/null || true
-        # Note: chrome-gnome-shell is a dummy transitional pkg in Trixie
 
-    # Set power button action to suspend (not power off — SER8 always-on usage)
     if [[ -n "${SUDO_USER:-}" ]]; then
-        sudo -u "$SUDO_USER" dbus-launch gsettings set org.gnome.settings-daemon.plugins.power \
-            power-button-action 'suspend' 2>/dev/null || true
-        # Fractional scaling for HiDPI displays
-        sudo -u "$SUDO_USER" dbus-launch gsettings set org.gnome.mutter \
-            experimental-features "['scale-monitor-framebuffer']" 2>/dev/null || true
+        sudo -u "$SUDO_USER" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u "$SUDO_USER")/bus" \
+            dbus-launch gsettings set \
+                org.gnome.settings-daemon.plugins.power power-button-action 'suspend' \
+            2>/dev/null || true
+        sudo -u "$SUDO_USER" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u "$SUDO_USER")/bus" \
+            dbus-launch gsettings set \
+                org.gnome.mutter experimental-features "['scale-monitor-framebuffer']" \
+            2>/dev/null || true
     fi
     success "GNOME tweaks applied."
 
@@ -690,53 +938,38 @@ elif command -v plasmashell &>/dev/null; then
 fi
 
 # =============================================================================
-# STEP 20 — ZSH + OH MY ZSH + STARSHIP (GRUVBOX RAINBOW) + NERD FONT
+# STEP 22 — ZSH + OH MY ZSH + STARSHIP (GRUVBOX RAINBOW) + NERD FONT
 # =============================================================================
-step "Step 20 — zsh + Oh My Zsh + Starship (Gruvbox Rainbow) + JetBrainsMono Nerd Font"
+step "Step 22 — zsh + Oh My Zsh + Starship (Gruvbox Rainbow) + JetBrainsMono Nerd Font"
 
-# ── 20.1  Determine the real user (not root) ────────────────────────────────
-# The script runs as root via sudo; SUDO_USER holds the actual username.
-# If run directly as root (e.g. in a live installer), fallback to root itself.
-if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
-    REAL_USER="$SUDO_USER"
-    REAL_HOME="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
-else
-    REAL_USER="root"
-    REAL_HOME="/root"
-fi
 info "Configuring shell environment for user: ${REAL_USER} (home: ${REAL_HOME})"
 
-# ── 20.2  Install zsh and required APT dependencies ─────────────────────────
-info "Installing zsh and required dependencies..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    zsh \
-    zsh-common \
-    git \
-    curl \
-    wget \
-    fontconfig \
-    unzip \
-    xfonts-utils
+# ── 20.1  Install zsh and dependencies ──────────────────────────────────────
+safe_install "zsh and font dependencies" \
+    zsh zsh-common git curl wget fontconfig unzip xfonts-utils
 
-# ── 20.3  Set zsh as the default shell for the real user ────────────────────
+# ── 20.2  Set zsh as default shell ──────────────────────────────────────────
 info "Setting zsh as default shell for ${REAL_USER}..."
-chsh -s "$(which zsh)" "$REAL_USER"
+chsh -s "$(command -v zsh)" "$REAL_USER"
 success "Default shell changed to zsh."
 
-# ── 20.4  Install JetBrainsMono Nerd Font (required for Starship glyphs) ────
+# ── 20.3  Install JetBrainsMono Nerd Font (system-wide) ─────────────────────
 info "Installing JetBrainsMono Nerd Font (system-wide)..."
 FONT_DIR="/usr/local/share/fonts/jetbrainsmono-nerd"
 mkdir -p "$FONT_DIR"
 
-# Fetch latest Nerd Fonts release tag from GitHub API
-NF_VERSION=$(curl -fsSL https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest \
-    | grep '"tag_name"' | head -1 | cut -d'"' -f4)
-# Fallback to a known stable version if API is unavailable
+# Fetch latest Nerd Fonts release tag; fall back to known stable version
+NF_VERSION=$(curl -fsSL --connect-timeout 10 \
+    https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest \
+    2>/dev/null | grep '"tag_name"' | head -1 | cut -d'"' -f4 || true)
 NF_VERSION="${NF_VERSION:-v3.2.1}"
 info "Nerd Fonts version: ${NF_VERSION}"
 
 FONT_ZIP="/tmp/JetBrainsMono-NF.zip"
 curl -fsSL \
+    --connect-timeout 30 \
+    --retry 3 \
+    --retry-delay 5 \
     "https://github.com/ryanoasis/nerd-fonts/releases/download/${NF_VERSION}/JetBrainsMono.zip" \
     -o "$FONT_ZIP"
 
@@ -746,101 +979,61 @@ rm -f "$FONT_ZIP"
 # Remove Windows-only variants (keep Linux TTF/OTF)
 find "$FONT_DIR" -name '*Windows*' -delete 2>/dev/null || true
 
-# Refresh font cache system-wide
 fc-cache -f "$FONT_DIR"
 success "JetBrainsMono Nerd Font installed to ${FONT_DIR}."
-info "  → Set 'JetBrainsMono Nerd Font' in your terminal emulator to display Starship glyphs correctly."
+info "  → Set 'JetBrainsMono Nerd Font' in your terminal emulator to display Starship glyphs."
 
-# ── 20.5  Install Oh My Zsh (unattended, for the real user) ─────────────────
+# ── 20.4  Install Oh My Zsh (unattended) ────────────────────────────────────
 info "Installing Oh My Zsh for ${REAL_USER}..."
 OMZ_DIR="${REAL_HOME}/.oh-my-zsh"
 
 if [[ -d "$OMZ_DIR" ]]; then
-    warn "Oh My Zsh already exists at ${OMZ_DIR} — skipping install, will update instead."
+    warn "Oh My Zsh already exists at ${OMZ_DIR} — updating instead."
     sudo -u "$REAL_USER" git -C "$OMZ_DIR" pull --rebase --quiet || true
 else
-    # Install Oh My Zsh without starting an interactive zsh session
     sudo -u "$REAL_USER" bash -c \
         'RUNZSH=no CHSH=no KEEP_ZSHRC=yes \
          sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"'
 fi
 success "Oh My Zsh installed."
 
-# Convenience variable used by plugin clone commands below
 ZSH_CUSTOM_DIR="${REAL_HOME}/.oh-my-zsh/custom"
 
-# ── 20.6  Install Oh My Zsh plugins ─────────────────────────────────────────
+# ── 20.5  Install Oh My Zsh plugins ─────────────────────────────────────────
 info "Installing Oh My Zsh plugins..."
 
-# Plugin: zsh-autosuggestions — suggests commands from history as you type
-if [[ ! -d "${ZSH_CUSTOM_DIR}/plugins/zsh-autosuggestions" ]]; then
-    sudo -u "$REAL_USER" git clone --depth=1 \
-        https://github.com/zsh-users/zsh-autosuggestions.git \
-        "${ZSH_CUSTOM_DIR}/plugins/zsh-autosuggestions"
-    success "Plugin installed: zsh-autosuggestions"
-else
-    info "Plugin already present: zsh-autosuggestions"
-fi
+declare -A OMZ_PLUGINS=(
+    ["zsh-autosuggestions"]="https://github.com/zsh-users/zsh-autosuggestions.git"
+    ["fast-syntax-highlighting"]="https://github.com/zdharma-continuum/fast-syntax-highlighting.git"
+    ["zsh-autocomplete"]="https://github.com/marlonrichert/zsh-autocomplete.git"
+    ["you-should-use"]="https://github.com/MichaelAquilina/zsh-you-should-use.git"
+)
 
-# Plugin: zsh-syntax-highlighting — colour-codes commands as you type
-if [[ ! -d "${ZSH_CUSTOM_DIR}/plugins/zsh-syntax-highlighting" ]]; then
-    sudo -u "$REAL_USER" git clone --depth=1 \
-        https://github.com/zsh-users/zsh-syntax-highlighting.git \
-        "${ZSH_CUSTOM_DIR}/plugins/zsh-syntax-highlighting"
-    success "Plugin installed: zsh-syntax-highlighting"
-else
-    info "Plugin already present: zsh-syntax-highlighting"
-fi
+for plugin in "${!OMZ_PLUGINS[@]}"; do
+    plugin_dir="${ZSH_CUSTOM_DIR}/plugins/${plugin}"
+    if [[ ! -d "$plugin_dir" ]]; then
+        sudo -u "$REAL_USER" git clone --depth=1 \
+            "${OMZ_PLUGINS[$plugin]}" "$plugin_dir"
+        success "Plugin installed: ${plugin}"
+    else
+        info "Plugin already present: ${plugin}"
+    fi
+done
 
-# Plugin: fast-syntax-highlighting — faster alternative to zsh-syntax-highlighting
-if [[ ! -d "${ZSH_CUSTOM_DIR}/plugins/fast-syntax-highlighting" ]]; then
-    sudo -u "$REAL_USER" git clone --depth=1 \
-        https://github.com/zdharma-continuum/fast-syntax-highlighting.git \
-        "${ZSH_CUSTOM_DIR}/plugins/fast-syntax-highlighting"
-    success "Plugin installed: fast-syntax-highlighting"
-else
-    info "Plugin already present: fast-syntax-highlighting"
-fi
-
-# Plugin: zsh-autocomplete — real-time tab completion as you type
-if [[ ! -d "${ZSH_CUSTOM_DIR}/plugins/zsh-autocomplete" ]]; then
-    sudo -u "$REAL_USER" git clone --depth=1 \
-        https://github.com/marlonrichert/zsh-autocomplete.git \
-        "${ZSH_CUSTOM_DIR}/plugins/zsh-autocomplete"
-    success "Plugin installed: zsh-autocomplete"
-else
-    info "Plugin already present: zsh-autocomplete"
-fi
-
-# Plugin: zsh-you-should-use — reminds you to use existing aliases
-if [[ ! -d "${ZSH_CUSTOM_DIR}/plugins/you-should-use" ]]; then
-    sudo -u "$REAL_USER" git clone --depth=1 \
-        https://github.com/MichaelAquilina/zsh-you-should-use.git \
-        "${ZSH_CUSTOM_DIR}/plugins/you-should-use"
-    success "Plugin installed: you-should-use"
-else
-    info "Plugin already present: you-should-use"
-fi
-
-# ── 20.7  Install Starship prompt (latest binary via official installer) ─────
+# ── 20.6  Install Starship prompt ────────────────────────────────────────────
 info "Installing Starship prompt (latest release)..."
-# The official installer places the binary in /usr/local/bin
 curl -fsSL https://starship.rs/install.sh | sh -s -- --yes
 success "Starship installed: $(starship --version 2>/dev/null || echo 'check /usr/local/bin/starship')"
 
-# ── 20.8  Apply Gruvbox Rainbow preset ───────────────────────────────────────
+# ── 20.7  Apply Gruvbox Rainbow preset ───────────────────────────────────────
 info "Applying Starship Gruvbox Rainbow preset..."
 STARSHIP_CFG_DIR="${REAL_HOME}/.config"
 STARSHIP_CFG="${STARSHIP_CFG_DIR}/starship.toml"
 
-# Create config dir owned by the real user
 sudo -u "$REAL_USER" mkdir -p "$STARSHIP_CFG_DIR"
-
-# Apply preset — this fetches and writes the official gruvbox-rainbow config
 sudo -u "$REAL_USER" starship preset gruvbox-rainbow -o "$STARSHIP_CFG"
 
-# Add Debian symbol to os.symbols (not in the default preset)
-# Appended safely — toml block will only override [os.symbols] values
+# Append Debian symbol block (safe append — only affects [os.symbols])
 cat >> "$STARSHIP_CFG" << 'TOML'
 
 # ── Debian symbol (added by post-install script) ────────────────────────────
@@ -867,17 +1060,14 @@ Redhat = "󱄛"
 NixOS = "󱄅"
 TOML
 
-chown "$REAL_USER":"$REAL_USER" "$STARSHIP_CFG" 2>/dev/null || true
+chown "${REAL_USER}:${REAL_USER}" "$STARSHIP_CFG" 2>/dev/null || true
 success "Gruvbox Rainbow preset written to ${STARSHIP_CFG}."
 
-# ── 20.9  Write .zshrc (Oh My Zsh theme=none so Starship takes over) ─────────
+# ── 20.8  Write .zshrc ───────────────────────────────────────────────────────
 info "Writing ${REAL_HOME}/.zshrc ..."
 ZSHRC="${REAL_HOME}/.zshrc"
-
-# Back up existing .zshrc if present
 [[ -f "$ZSHRC" ]] && cp "$ZSHRC" "${ZSHRC}.bak_$(date +%Y%m%d_%H%M%S)"
 
-# Write a clean, well-commented .zshrc
 sudo -u "$REAL_USER" tee "$ZSHRC" > /dev/null << 'ZSHRC_EOF'
 # ============================================================
 #  ~/.zshrc — Zsh configuration
@@ -899,8 +1089,7 @@ setopt HIST_FIND_NO_DUPS
 setopt SHARE_HISTORY
 
 # ── Oh My Zsh plugins ────────────────────────────────────────
-# NOTE: zsh-syntax-highlighting and fast-syntax-highlighting should
-#       NOT both be active at the same time — using fast-syntax-highlighting.
+# NOTE: fast-syntax-highlighting replaces zsh-syntax-highlighting (don't use both)
 plugins=(
     git
     sudo
@@ -957,155 +1146,233 @@ fi
 eval "$(starship init zsh)"
 ZSHRC_EOF
 
-chown "$REAL_USER":"$REAL_USER" "$ZSHRC"
-success ".zshrc written to ${ZSHRC}."
+chown "${REAL_USER}:${REAL_USER}" "$ZSHRC"
 
-# ── 20.10  Ownership sanity check ───────────────────────────────────────────
-chown -R "$REAL_USER":"$REAL_USER" \
+# ── 20.9  Ownership sanity check ────────────────────────────────────────────
+chown -R "${REAL_USER}:${REAL_USER}" \
     "${REAL_HOME}/.oh-my-zsh" \
     "${REAL_HOME}/.config/starship.toml" \
     2>/dev/null || true
 
-success "Step 20 complete — zsh + Oh My Zsh + Starship (Gruvbox Rainbow) fully configured."
-warn "Open a new terminal session to activate zsh. If it doesn't start automatically, run: zsh"
+success "Step 20 complete — zsh + Oh My Zsh + Starship (Gruvbox Rainbow) configured."
+warn "Open a new terminal session to activate zsh. If it doesn't auto-start, run: zsh"
 
 # =============================================================================
-# STEP 21 — UBUNTU LOOK & FEEL
+# STEP 23 — UBUNTU LOOK & FEEL
 #   Yaru theme (GTK + Shell + Icons + Cursor + Sound)
 #   Ubuntu font family
 #   Dash-to-Dock + AppIndicator + Desktop Icons NG
 #   gsettings to wire everything together
 # =============================================================================
-step "Step 21 — Ubuntu look & feel (Yaru theme, Ubuntu fonts, Dash-to-Dock)"
+step "Step 23 — Desktop look & feel (Gruvbox Minimal GTK theme, Yaru base, Ubuntu fonts, Dash-to-Dock)"
 
-# Only applies to GNOME — skip silently on other DEs
 if ! command -v gnome-shell &>/dev/null; then
-    warn "GNOME Shell not detected — skipping Ubuntu look & feel step."
+    warn "GNOME Shell not detected — skipping desktop look & feel step."
 else
 
-# ── 21.1  Determine real user (same logic as Step 20) ───────────────────────
-if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
-    LOOK_USER="$SUDO_USER"
-    LOOK_HOME="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
-else
-    LOOK_USER="root"
-    LOOK_HOME="/root"
-fi
+# ── Determine look-and-feel target user ─────────────────────────────────────
+LOOK_USER="$REAL_USER"
+LOOK_HOME="$REAL_HOME"
 
-# Helper: run gsettings as the real user (needs dbus session)
+# Helper: run gsettings as the real user via their dbus session
 run_gsettings() {
     sudo -u "$LOOK_USER" \
         DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u "$LOOK_USER")/bus" \
         gsettings "$@" 2>/dev/null || true
 }
 
-# ── 21.2  Install Yaru theme packages ───────────────────────────────────────
-info "Installing Yaru theme packages (GTK, Shell, Icons, Cursor, Sound)..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y \
+# ── 23.1  Yaru base packages (GTK engine + icons + sound used as fallback) ──
+info "Installing Yaru base packages..."
+safe_install "Yaru theme base" \
     yaru-theme-gtk \
     yaru-theme-gnome-shell \
     yaru-theme-icon \
     yaru-theme-sound \
-    yaru-theme-unity \
     gnome-themes-extra \
     adwaita-icon-theme-full \
     gtk2-engines-murrine \
     gtk2-engines-pixbuf
-success "Yaru theme packages installed."
 
-# ── 21.3  Install Ubuntu font family ────────────────────────────────────────
-info "Installing Ubuntu font family..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    fonts-ubuntu \
-    fonts-ubuntu-console
+# ── 23.2  Papirus icon theme (best companion for Gruvbox) ────────────────────
+# Papirus ships a Gruvbox-coloured folder variant via papirus-folders.
+info "Installing Papirus icon theme..."
+safe_install "Papirus icon theme" papirus-icon-theme
+
+# Apply Gruvbox orange folder colour to Papirus via papirus-folders script
+# The script is bundled inside the papirus-icon-theme package in Trixie.
+if command -v papirus-folders &>/dev/null; then
+    papirus-folders --color yaru --theme Papirus-Dark 2>/dev/null || true
+    info "Papirus folders: set to Gruvbox-compatible orange palette."
+fi
+
+# ── 23.3  Ubuntu fonts ───────────────────────────────────────────────────────
+safe_install "Ubuntu font family" fonts-ubuntu fonts-ubuntu-console
 fc-cache -f
-success "Ubuntu fonts installed."
 
-# ── 21.4  Install GNOME Shell extensions ────────────────────────────────────
-info "Installing GNOME Shell extensions..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y \
+# ── 23.4  GNOME Shell extensions ─────────────────────────────────────────────
+safe_install "GNOME Shell extensions" \
     gnome-shell-extension-dashtodock \
     gnome-shell-extension-desktop-icons-ng \
     gnome-shell-extension-appindicator \
     gnome-shell-extension-user-theme \
     gnome-shell-extension-manager \
     gnome-tweaks
-success "GNOME Shell extensions installed."
 
-# ── 21.5  Apply gsettings — theme, fonts, dock, extensions ──────────────────
-info "Applying gsettings (Yaru-dark theme, Ubuntu fonts, dock layout)..."
+# ── 23.5  Gruvbox Minimal GTK + GNOME Shell theme ────────────────────────────
+# Source: https://github.com/Fausto-Korpsvart/Gruvbox-GTK-Theme
+# Provides:  GTK 3/4 theming, libadwaita recolouring, GNOME Shell theme,
+#            and a matching GDM background. The "Minimal" variant strips
+#            transparency/blur so it stays crisp and performant on iGPU hardware.
+#
+# Colour palette used (Gruvbox dark, hard contrast):
+#   bg0_h  #1d2021   bg0    #282828   bg1    #3c3836
+#   fg0    #fbf1c7   fg1    #ebdbb2
+#   orange #d65d0e   red    #cc241d   green  #98971a
+#   yellow #d79921   blue   #458588   purple #b16286   aqua   #689d6a
 
-# ── Theme & icons ─────────────────────────────────────────────────────────
-run_gsettings set org.gnome.desktop.interface gtk-theme       'Yaru-dark'
-run_gsettings set org.gnome.desktop.interface icon-theme      'Yaru-dark'
-run_gsettings set org.gnome.desktop.interface cursor-theme    'Yaru'
-run_gsettings set org.gnome.desktop.interface cursor-size     24
+info "Installing Gruvbox-GTK-Theme (Minimal variant)..."
 
-# Shell theme (requires User Theme extension to be enabled first — done below)
-run_gsettings set org.gnome.shell.extensions.user-theme name 'Yaru-dark' 2>/dev/null || true
+GRUVBOX_THEME_DIR="/usr/share/themes/Gruvbox-Dark-BL"   # BL = Border-Left (Minimal style)
+GRUVBOX_REPO_URL="https://github.com/Fausto-Korpsvart/Gruvbox-GTK-Theme"
+GRUVBOX_TMP="/tmp/gruvbox-gtk-theme"
 
-# ── Sound theme ────────────────────────────────────────────────────────────
-run_gsettings set org.gnome.desktop.sound theme-name          'Yaru'
-run_gsettings set org.gnome.desktop.sound event-sounds        true
+# Clone the repo (shallow, no history needed)
+if [[ -d "$GRUVBOX_TMP" ]]; then
+    rm -rf "$GRUVBOX_TMP"
+fi
 
-# ── Ubuntu fonts ───────────────────────────────────────────────────────────
-run_gsettings set org.gnome.desktop.interface font-name        'Ubuntu 11'
-run_gsettings set org.gnome.desktop.interface document-font-name 'Ubuntu 11'
+if git clone --depth=1 \
+    --single-branch --branch main \
+    "$GRUVBOX_REPO_URL" "$GRUVBOX_TMP" 2>/dev/null; then
+
+    # ── Install GTK 2/3/4 themes ───────────────────────────────────────────
+    # The repo ships pre-built theme directories under themes/
+    # Copy all Gruvbox-Dark variants to /usr/share/themes/
+    if [[ -d "${GRUVBOX_TMP}/themes" ]]; then
+        find "${GRUVBOX_TMP}/themes" -maxdepth 1 -type d -name 'Gruvbox*' \
+            | while read -r theme_dir; do
+                theme_name="$(basename "$theme_dir")"
+                rm -rf "/usr/share/themes/${theme_name}"
+                cp -r "$theme_dir" "/usr/share/themes/${theme_name}"
+                info "Installed GTK theme: ${theme_name}"
+              done
+    fi
+
+    # ── Install GNOME Shell theme ──────────────────────────────────────────
+    # Shell themes live under themes/<variant>/gnome-shell/
+    # We use the Gruvbox-Dark-BL-GS (BL = no roundness, GS = GNOME Shell)
+    # Copy to /usr/share/themes so the User Theme extension can find it.
+    GNOME_SHELL_THEME_SRC="${GRUVBOX_TMP}/themes/Gruvbox-Dark-BL"
+    if [[ -d "${GNOME_SHELL_THEME_SRC}/gnome-shell" ]]; then
+        info "GNOME Shell theme is bundled inside Gruvbox-Dark-BL — already installed."
+    fi
+
+    # ── Install wallpaper(s) included in the repo ──────────────────────────
+    GRUVBOX_WALLPAPER_DIR="/usr/share/backgrounds/gruvbox"
+    mkdir -p "$GRUVBOX_WALLPAPER_DIR"
+    if [[ -d "${GRUVBOX_TMP}/wallpapers" ]]; then
+        cp -r "${GRUVBOX_TMP}/wallpapers"/. "$GRUVBOX_WALLPAPER_DIR/"
+        info "Gruvbox wallpapers installed to ${GRUVBOX_WALLPAPER_DIR}."
+    elif [[ -d "${GRUVBOX_TMP}/backgrounds" ]]; then
+        cp -r "${GRUVBOX_TMP}/backgrounds"/. "$GRUVBOX_WALLPAPER_DIR/"
+        info "Gruvbox backgrounds installed to ${GRUVBOX_WALLPAPER_DIR}."
+    fi
+
+    rm -rf "$GRUVBOX_TMP"
+    success "Gruvbox-GTK-Theme installed (Dark-BL / Minimal variant)."
+else
+    warn "Could not clone Gruvbox-GTK-Theme from GitHub."
+    warn "You can install it manually later from: ${GRUVBOX_REPO_URL}"
+    warn "Falling back to Yaru-dark for all theme settings."
+    GRUVBOX_INSTALL_FAILED=true
+fi
+
+GRUVBOX_INSTALL_FAILED="${GRUVBOX_INSTALL_FAILED:-false}"
+
+# ── Resolve theme names to use (Gruvbox if available, Yaru-dark fallback) ─
+if [[ "$GRUVBOX_INSTALL_FAILED" == "true" ]]; then
+    GTK_THEME="Yaru-dark"
+    SHELL_THEME="Yaru-dark"
+    ICON_THEME="Yaru-dark"
+    CURSOR_THEME="Yaru"
+    info "Using fallback theme: Yaru-dark"
+else
+    GTK_THEME="Gruvbox-Dark-BL"
+    SHELL_THEME="Gruvbox-Dark-BL"
+    ICON_THEME="Papirus-Dark"
+    CURSOR_THEME="Yaru"      # Yaru cursor is clean and neutral — Gruvbox has no cursor theme
+    info "Using Gruvbox-Dark-BL (Minimal) + Papirus-Dark icons."
+fi
+
+# ── 23.6  Apply gsettings ─────────────────────────────────────────────────────
+info "Applying gsettings (${GTK_THEME} theme, Ubuntu fonts, dock layout)..."
+
+# Theme & icons
+run_gsettings set org.gnome.desktop.interface gtk-theme         "$GTK_THEME"
+run_gsettings set org.gnome.desktop.interface icon-theme        "$ICON_THEME"
+run_gsettings set org.gnome.desktop.interface cursor-theme      "$CURSOR_THEME"
+run_gsettings set org.gnome.desktop.interface cursor-size       24
+
+# Shell theme (requires User Theme extension to be enabled)
+run_gsettings set org.gnome.shell.extensions.user-theme name   "$SHELL_THEME"
+
+# Sound theme (Yaru — no Gruvbox-specific sound theme exists)
+run_gsettings set org.gnome.desktop.sound theme-name           'Yaru'
+run_gsettings set org.gnome.desktop.sound event-sounds         true
+
+# Ubuntu fonts (warm, readable — pairs well with Gruvbox warm tones)
+run_gsettings set org.gnome.desktop.interface font-name           'Ubuntu 11'
+run_gsettings set org.gnome.desktop.interface document-font-name  'Ubuntu 11'
 run_gsettings set org.gnome.desktop.interface monospace-font-name 'Ubuntu Mono 13'
-run_gsettings set org.gnome.desktop.wm.preferences titlebar-font 'Ubuntu Bold 11'
+run_gsettings set org.gnome.desktop.wm.preferences titlebar-font  'Ubuntu Bold 11'
 
-# ── Colour scheme (dark mode) ──────────────────────────────────────────────
-run_gsettings set org.gnome.desktop.interface color-scheme    'prefer-dark'
-
-# ── Text rendering ─────────────────────────────────────────────────────────
+# Dark mode + text rendering
+run_gsettings set org.gnome.desktop.interface color-scheme      'prefer-dark'
 run_gsettings set org.gnome.desktop.interface font-antialiasing 'rgba'
-run_gsettings set org.gnome.desktop.interface font-hinting     'slight'
+run_gsettings set org.gnome.desktop.interface font-hinting      'slight'
 
-# ── XCURSOR_SIZE for Wayland/X11 consistency ──────────────────────────────
+# XCURSOR_SIZE for Wayland/X11 consistency
 grep -q "XCURSOR_SIZE" /etc/environment \
     || echo "XCURSOR_SIZE=24" >> /etc/environment
 
-# ── Workspaces ─────────────────────────────────────────────────────────────
-run_gsettings set org.gnome.desktop.wm.preferences button-layout 'appmenu:minimize,maximize,close'
-run_gsettings set org.gnome.mutter dynamic-workspaces          true
+# Workspaces & window controls
+run_gsettings set org.gnome.desktop.wm.preferences button-layout  'appmenu:minimize,maximize,close'
+run_gsettings set org.gnome.mutter dynamic-workspaces              true
 run_gsettings set org.gnome.desktop.wm.preferences num-workspaces 4
 
-# ── Hot corners ────────────────────────────────────────────────────────────
-run_gsettings set org.gnome.desktop.interface enable-hot-corners true
+# Hot corners
+run_gsettings set org.gnome.desktop.interface enable-hot-corners   true
 
-# ── Night Light (Ubuntu-style warm evening tone) ───────────────────────────
-run_gsettings set org.gnome.settings-daemon.plugins.color night-light-enabled true
+# Night Light — Gruvbox warm tones pair perfectly with a low colour temperature
+run_gsettings set org.gnome.settings-daemon.plugins.color night-light-enabled           true
 run_gsettings set org.gnome.settings-daemon.plugins.color night-light-schedule-automatic true
-run_gsettings set org.gnome.settings-daemon.plugins.color night-light-temperature 4000
+run_gsettings set org.gnome.settings-daemon.plugins.color night-light-temperature       3700
 
-# ── Dash-to-Dock configuration (Ubuntu dock style) ────────────────────────
-# Position: bottom, auto-hide, extend to edges, fixed icon size 48px
+# Dash-to-Dock — minimal config (transparent, auto-hide, Gruvbox-neutral)
 DTD="org.gnome.shell.extensions.dash-to-dock"
-run_gsettings set $DTD dock-position        'BOTTOM'
-run_gsettings set $DTD dock-fixed           false
-run_gsettings set $DTD autohide             true
-run_gsettings set $DTD intellihide          true
-run_gsettings set $DTD extend-height        false
-run_gsettings set $DTD dash-max-icon-size   48
-run_gsettings set $DTD icon-size-fixed      true
-run_gsettings set $DTD show-trash           true
-run_gsettings set $DTD show-mounts          true
-run_gsettings set $DTD click-action         'focus-or-previews'
-run_gsettings set $DTD scroll-action        'cycle-windows'
-run_gsettings set $DTD transparency-mode    'FIXED'
-run_gsettings set $DTD background-opacity   0.8
-run_gsettings set $DTD custom-theme-shrink  true
+run_gsettings set $DTD dock-position       'BOTTOM'
+run_gsettings set $DTD dock-fixed          false
+run_gsettings set $DTD autohide            true
+run_gsettings set $DTD intellihide         true
+run_gsettings set $DTD extend-height       false
+run_gsettings set $DTD dash-max-icon-size  48
+run_gsettings set $DTD icon-size-fixed     true
+run_gsettings set $DTD show-trash          true
+run_gsettings set $DTD show-mounts         true
+run_gsettings set $DTD click-action        'focus-or-previews'
+run_gsettings set $DTD scroll-action       'cycle-windows'
+run_gsettings set $DTD transparency-mode   'FIXED'
+run_gsettings set $DTD background-opacity  0.75
+run_gsettings set $DTD custom-theme-shrink true
 
-# ── Enable GNOME Shell extensions ─────────────────────────────────────────
+# ── 23.7  Enable GNOME Shell extensions ──────────────────────────────────────
 info "Enabling GNOME Shell extensions..."
 
-# Get current enabled extension list and append ours
 CURRENT_EXTS=$(sudo -u "$LOOK_USER" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u "$LOOK_USER")/bus" \
     gsettings get org.gnome.shell enabled-extensions 2>/dev/null \
     || echo "@as []")
 
-# Extension UUIDs
 EXTS_TO_ENABLE=(
     "dash-to-dock@micxgx.gmail.com"
     "ding@rastersoft.com"
@@ -1113,55 +1380,68 @@ EXTS_TO_ENABLE=(
     "user-theme@gnome-shell-extensions.gcampax.github.com"
 )
 
-# Build new extension list by merging current + new (deduped)
 NEW_EXTS="$CURRENT_EXTS"
 for ext in "${EXTS_TO_ENABLE[@]}"; do
     if ! echo "$NEW_EXTS" | grep -q "$ext"; then
         NEW_EXTS=$(echo "$NEW_EXTS" | sed "s/\]$/, '$ext'\]/")
-        # Handle empty list edge case
         NEW_EXTS=$(echo "$NEW_EXTS" | sed "s/@as \[\]/['$ext']/")
     fi
 done
 
-run_gsettings set org.gnome.shell enabled-extensions "$NEW_EXTS" 2>/dev/null || \
-    warn "Could not set enabled-extensions (no active GNOME session) — extensions will activate on next login."
+run_gsettings set org.gnome.shell enabled-extensions "$NEW_EXTS" \
+    || warn "Could not set enabled-extensions (no active GNOME session) — extensions activate on next login."
 
-success "Extensions enabled (will take effect on next GNOME login)."
+success "Extensions enabled (take effect on next GNOME login)."
 
-# ── 21.6  Wallpaper — Ubuntu-style amber gradient ────────────────────────
-info "Setting default wallpaper..."
-# Use Debian 13 Trixie default wallpaper (Ceratopsian) as base
-# but apply Ubuntu-style amber overlay via dconf if available
-WALLPAPER_LIGHT="/usr/share/backgrounds/gnome/amber-l.jxl"
-WALLPAPER_DARK="/usr/share/backgrounds/gnome/amber-d.jxl"
-WALLPAPER_DEBIAN_LIGHT="/usr/share/images/desktop-base/desktop-background"
-WALLPAPER_DEBIAN_DARK="/usr/share/images/desktop-base/desktop-background"
+# ── 23.8  Wallpaper ──────────────────────────────────────────────────────────
+info "Setting wallpaper..."
+# Prefer a Gruvbox wallpaper if we installed them; fall back to GNOME amber, then Debian default
+GRUVBOX_WALLPAPER_DIR="/usr/share/backgrounds/gruvbox"
 
-# Install desktop-base for Trixie wallpaper
-DEBIAN_FRONTEND=noninteractive apt-get install -y desktop-base 2>/dev/null || true
+find_gruvbox_wallpaper() {
+    # Look for a dark wallpaper: prefer png/jpg named *dark*, *bg*, or any image
+    find "$GRUVBOX_WALLPAPER_DIR" -type f \
+        \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) \
+        2>/dev/null | sort | head -1
+}
 
-# Prefer amber GNOME wallpaper (ships with gnome-backgrounds) if available
-DEBIAN_FRONTEND=noninteractive apt-get install -y gnome-backgrounds 2>/dev/null || true
-
-if [[ -f "$WALLPAPER_LIGHT" ]]; then
-    run_gsettings set org.gnome.desktop.background picture-uri       "file://${WALLPAPER_LIGHT}"
-    run_gsettings set org.gnome.desktop.background picture-uri-dark  "file://${WALLPAPER_DARK}"
-elif [[ -f "$WALLPAPER_DEBIAN_LIGHT" ]]; then
-    run_gsettings set org.gnome.desktop.background picture-uri       "file://${WALLPAPER_DEBIAN_LIGHT}"
-    run_gsettings set org.gnome.desktop.background picture-uri-dark  "file://${WALLPAPER_DEBIAN_DARK}"
+GRUVBOX_WP=""
+if [[ -d "$GRUVBOX_WALLPAPER_DIR" ]]; then
+    GRUVBOX_WP=$(find_gruvbox_wallpaper)
 fi
-run_gsettings set org.gnome.desktop.background picture-options   'zoom'
 
-# ── 21.7  GDM login screen theme (Yaru-dark) ─────────────────────────────
-info "Applying Yaru-dark to GDM login screen..."
-# GDM background is set via /etc/gdm3/greeter.dconf-defaults
+if [[ -n "$GRUVBOX_WP" ]]; then
+    run_gsettings set org.gnome.desktop.background picture-uri      "file://${GRUVBOX_WP}"
+    run_gsettings set org.gnome.desktop.background picture-uri-dark "file://${GRUVBOX_WP}"
+    run_gsettings set org.gnome.desktop.background picture-options  'zoom'
+    info "Gruvbox wallpaper set: ${GRUVBOX_WP}"
+else
+    # Fallback chain: GNOME amber → Debian default
+    DEBIAN_FRONTEND=noninteractive apt-get install -y desktop-base gnome-backgrounds 2>/dev/null || true
+    WALLPAPER_LIGHT="/usr/share/backgrounds/gnome/amber-l.jxl"
+    WALLPAPER_DARK="/usr/share/backgrounds/gnome/amber-d.jxl"
+    WALLPAPER_DEBIAN="/usr/share/images/desktop-base/desktop-background"
+
+    if [[ -f "$WALLPAPER_LIGHT" ]]; then
+        run_gsettings set org.gnome.desktop.background picture-uri      "file://${WALLPAPER_LIGHT}"
+        run_gsettings set org.gnome.desktop.background picture-uri-dark "file://${WALLPAPER_DARK}"
+    elif [[ -f "$WALLPAPER_DEBIAN" ]]; then
+        run_gsettings set org.gnome.desktop.background picture-uri      "file://${WALLPAPER_DEBIAN}"
+        run_gsettings set org.gnome.desktop.background picture-uri-dark "file://${WALLPAPER_DEBIAN}"
+    fi
+    run_gsettings set org.gnome.desktop.background picture-options 'zoom'
+    info "Gruvbox wallpapers not found — using fallback wallpaper."
+fi
+
+# ── 23.9  GDM login screen theme ─────────────────────────────────────────────
+info "Applying ${GTK_THEME} to GDM login screen..."
 if [[ -d /etc/gdm3 ]]; then
     mkdir -p /etc/dconf/db/gdm.d
-    cat > /etc/dconf/db/gdm.d/01-ubuntu-look << 'EOF'
+    deploy_config /etc/dconf/db/gdm.d/01-gruvbox-look << EOF
 [org/gnome/desktop/interface]
-gtk-theme='Yaru-dark'
-icon-theme='Yaru-dark'
-cursor-theme='Yaru'
+gtk-theme='${GTK_THEME}'
+icon-theme='${ICON_THEME}'
+cursor-theme='${CURSOR_THEME}'
 font-name='Ubuntu 11'
 color-scheme='prefer-dark'
 
@@ -1169,28 +1449,65 @@ color-scheme='prefer-dark'
 picture-options='zoom'
 EOF
     dconf update 2>/dev/null || true
-    success "GDM theme set to Yaru-dark."
+    success "GDM theme set to ${GTK_THEME}."
 else
     warn "GDM not found — skipping login screen theming."
 fi
 
-success "Step 21 complete — Ubuntu look & feel applied."
-info "  → Log out and back in (or reboot) to see Dash-to-Dock and the Yaru Shell theme."
-info "  → If the Shell theme doesn't apply, open GNOME Tweaks → Appearance → Shell → select Yaru-dark."
+# ── 23.10  GTK4 / libadwaita override (Gruvbox recolour) ─────────────────────
+# GNOME 45+ apps use libadwaita and ignore GTK themes by default.
+# The Gruvbox-GTK-Theme ships a gtk4 directory for this; we symlink it into
+# the user's ~/.config/gtk-4.0/ so libadwaita apps pick it up.
+if [[ "$GRUVBOX_INSTALL_FAILED" == "false" ]]; then
+    info "Applying Gruvbox GTK4 / libadwaita recolour..."
+    GRUVBOX_GTK4_SRC="/usr/share/themes/${GTK_THEME}/gtk-4.0"
+    USER_GTK4_DIR="${LOOK_HOME}/.config/gtk-4.0"
+
+    if [[ -d "$GRUVBOX_GTK4_SRC" ]]; then
+        sudo -u "$LOOK_USER" mkdir -p "$USER_GTK4_DIR"
+        # Link assets and gtk.css — overwrite existing links
+        for f in gtk.css gtk-dark.css assets; do
+            src="${GRUVBOX_GTK4_SRC}/${f}"
+            dst="${USER_GTK4_DIR}/${f}"
+            [[ -e "$src" ]] || continue
+            sudo -u "$LOOK_USER" ln -sfn "$src" "$dst"
+            info "  Linked: ${dst} → ${src}"
+        done
+        chown -h "${LOOK_USER}:${LOOK_USER}" \
+            "${USER_GTK4_DIR}/gtk.css" \
+            "${USER_GTK4_DIR}/gtk-dark.css" \
+            "${USER_GTK4_DIR}/assets" 2>/dev/null || true
+        success "GTK4 / libadwaita recolour applied for ${LOOK_USER}."
+    else
+        warn "GTK4 directory not found in ${GTK_THEME} — libadwaita apps will use default colours."
+        warn "Path checked: ${GRUVBOX_GTK4_SRC}"
+    fi
+fi
+
+success "Step 23 complete — Gruvbox Minimal desktop theme applied."
+info "  → Active theme  : ${GTK_THEME} (GTK 3/4 + GNOME Shell)"
+info "  → Icon theme    : ${ICON_THEME}"
+info "  → Font          : Ubuntu 11 / Ubuntu Mono 13"
+info "  → Log out and back in (or reboot) to see the full theme."
+info "  → Shell theme: GNOME Tweaks → Appearance → Shell → ${SHELL_THEME}"
+info "  → To try other Gruvbox variants: GNOME Tweaks → Appearance → Applications"
 
 fi  # end GNOME check
 
 # =============================================================================
-# STEP 22 — FINAL CLEANUP
+# STEP 24 — FINAL CLEANUP
 # =============================================================================
-step "Step 22 — Final cleanup"
+step "Step 24 — Final cleanup"
 
-info "Cleaning up APT cache..."
+info "Removing unused packages and cleaning APT cache..."
 apt-get autoremove -y
 apt-get autoclean -y
 apt-get clean
 
 success "Cleanup complete."
+
+# ── Remove ERR trap now that we're done ───────────────────────────────────────
+trap - ERR
 
 # =============================================================================
 # SUMMARY
@@ -1199,31 +1516,37 @@ echo ""
 echo -e "${GRN}╔══════════════════════════════════════════════════════════════╗${RST}"
 echo -e "${GRN}║     Debian 13 Post-Install Complete — Beelink SER8          ║${RST}"
 echo -e "${GRN}╠══════════════════════════════════════════════════════════════╣${RST}"
-echo -e "${GRN}║  ✓  System updated & base packages installed                ║${RST}"
+echo -e "${GRN}║  ✓  Hardware detected & verified                            ║${RST}"
+echo -e "${GRN}║  ✓  APT sources: main + backports (pinned at priority 200)  ║${RST}"
+echo -e "${GRN}║  ✓  Backported kernel installed (latest from backports)     ║${RST}"
+echo -e "${GRN}║  ✓  Minimal GNOME desktop (GDM3 + Wayland + NM)            ║${RST}"
+echo -e "${GRN}║  ✓  Base packages installed (grouped, dry-run preflight)    ║${RST}"
 echo -e "${GRN}║  ✓  AMD Radeon 780M (RDNA 3) drivers & firmware             ║${RST}"
 echo -e "${GRN}║  ✓  Ryzen 7 8845HS microcode + amd_pstate=active            ║${RST}"
-echo -e "${GRN}║  ✓  GRUB kernel parameters optimised                        ║${RST}"
-echo -e "${GRN}║  ✓  NVMe I/O scheduler + TRIM timer                         ║${RST}"
-echo -e "${GRN}║  ✓  Wi-Fi (Intel AX) & Bluetooth firmware                   ║${RST}"
-echo -e "${GRN}║  ✓  PipeWire + SOF audio                                    ║${RST}"
-echo -e "${GRN}║  ✓  zram swap (25%, zstd)                                   ║${RST}"
-echo -e "${GRN}║  ✓  sysctl network & memory tuning                          ║${RST}"
-echo -e "${GRN}║  ✓  fwupd firmware update daemon                            ║${RST}"
-echo -e "${GRN}║  ✓  UFW firewall + fail2ban                                 ║${RST}"
-echo -e "${GRN}║  ✓  Flatpak + Flathub                                       ║${RST}"
-echo -e "${GRN}║  ✓  zsh + Oh My Zsh + Starship Gruvbox Rainbow              ║${RST}"
-echo -e "${GRN}║  ✓  JetBrainsMono Nerd Font (system-wide)                   ║${RST}"
-echo -e "${GRN}║  ✓  Yaru-dark theme + Ubuntu fonts + Dash-to-Dock           ║${RST}"
+echo -e "${GRN}║  ✓  GRUB kernel parameters (safe atomic replace)            ║${RST}"
+echo -e "${GRN}║  ✓  NVMe I/O scheduler (mq-deadline) + TRIM timer          ║${RST}"
+echo -e "${GRN}║  ✓  Wi-Fi (Intel AX) & Bluetooth firmware                  ║${RST}"
+echo -e "${GRN}║  ✓  PipeWire + SOF audio                                   ║${RST}"
+echo -e "${GRN}║  ✓  zram swap (25%, zstd)                                  ║${RST}"
+echo -e "${GRN}║  ✓  sysctl network & memory tuning                         ║${RST}"
+echo -e "${GRN}║  ✓  fwupd firmware update daemon                           ║${RST}"
+echo -e "${GRN}║  ✓  UFW firewall + fail2ban                                ║${RST}"
+echo -e "${GRN}║  ✓  Flatpak + Flathub                                      ║${RST}"
+echo -e "${GRN}║  ✓  zsh + Oh My Zsh + Starship Gruvbox Rainbow             ║${RST}"
+echo -e "${GRN}║  ✓  JetBrainsMono Nerd Font (system-wide)                  ║${RST}"
+echo -e "${GRN}║  ✓  Gruvbox-Dark-BL (Minimal) GTK/Shell + Papirus-Dark icons  ║${RST}"
+echo -e "${GRN}║  ✓  APT cache cleaned up                                   ║${RST}"
 echo -e "${GRN}╠══════════════════════════════════════════════════════════════╣${RST}"
-echo -e "${YLW}║  NEXT STEPS:                                                 ║${RST}"
-echo -e "${YLW}║  • Open new terminal → zsh/Starship will load automatically  ║${RST}"
-echo -e "${YLW}║  • Set terminal font to: JetBrainsMono Nerd Font             ║${RST}"
+echo -e "${YLW}║  NEXT STEPS (after reboot):                                  ║${RST}"
+echo -e "${YLW}║  • Verify kernel : uname -r  (should show backported ver.)  ║${RST}"
+echo -e "${YLW}║  • Open new terminal → zsh/Starship loads automatically     ║${RST}"
+echo -e "${YLW}║  • Set terminal font to: JetBrainsMono Nerd Font            ║${RST}"
 echo -e "${YLW}║  • Log out & back in to activate Yaru Shell + Dash-to-Dock  ║${RST}"
-echo -e "${YLW}║  • If Shell theme missing: Tweaks→Appearance→Shell→Yaru-dark ║${RST}"
-echo -e "${YLW}║  • Run: sensors-detect (thermal sensor setup)                ║${RST}"
-echo -e "${YLW}║  • Run: fwupdmgr update (BIOS/firmware updates)              ║${RST}"
-echo -e "${YLW}║  • Run: vainfo (verify hardware video decode)                ║${RST}"
-echo -e "${YLW}║  • Check: /var/log/debian13-postinstall-ser8.log             ║${RST}"
+echo -e "${YLW}║  • If Shell theme missing: Tweaks→Appearance→Shell→Gruvbox-Dark-BL ║${RST}"
+echo -e "${YLW}║  • Run: sensors           (thermal sensor readings)          ║${RST}"
+echo -e "${YLW}║  • Run: fwupdmgr update   (BIOS/firmware updates)           ║${RST}"
+echo -e "${YLW}║  • Run: vainfo            (verify hardware video decode)     ║${RST}"
+echo -e "${YLW}║  • Check: ${LOGFILE} ║${RST}"
 echo -e "${GRN}╚══════════════════════════════════════════════════════════════╝${RST}"
 echo ""
 
