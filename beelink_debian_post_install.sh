@@ -1045,7 +1045,7 @@ info "Installing Starship prompt (latest release)..."
 curl -fsSL https://starship.rs/install.sh | sh -s -- --yes
 success "Starship installed: $(starship --version 2>/dev/null || echo 'check /usr/local/bin/starship')"
 
-# ── 20.7  Apply Gruvbox Rainbow preset ───────────────────────────────────────
+# ── 22.7  Apply Gruvbox Rainbow preset ───────────────────────────────────────
 info "Applying Starship Gruvbox Rainbow preset..."
 STARSHIP_CFG_DIR="${REAL_HOME}/.config"
 STARSHIP_CFG="${STARSHIP_CFG_DIR}/starship.toml"
@@ -1053,32 +1053,26 @@ STARSHIP_CFG="${STARSHIP_CFG_DIR}/starship.toml"
 sudo -u "$REAL_USER" mkdir -p "$STARSHIP_CFG_DIR"
 sudo -u "$REAL_USER" starship preset gruvbox-rainbow -o "$STARSHIP_CFG"
 
-# Append Debian symbol block (safe append — only affects [os.symbols])
-cat >> "$STARSHIP_CFG" << 'TOML'
+# The gruvbox-rainbow preset already contains a complete [os.symbols] table.
+# We must NOT append another [os.symbols] block — TOML forbids duplicate table
+# headers and Starship will refuse to parse the config with the error:
+#   [ERROR] starship:config Unable to parse config file TOML
+#
+# Correct approach: inject only the missing Debian key into the EXISTING block
+# using sed, immediately after the [os.symbols] header line.
+if grep -q '^\[os\.symbols\]' "$STARSHIP_CFG"; then
+    # Insert Debian key on the line directly after [os.symbols]
+    sed -i '/^\[os\.symbols\]/a Debian = "󰣚"' "$STARSHIP_CFG"
+    info "Injected Debian symbol into existing [os.symbols] block."
+else
+    # Preset didn't write [os.symbols] (future preset change safety net)
+    cat >> "$STARSHIP_CFG" << 'TOML'
 
-# ── Debian symbol (added by post-install script) ────────────────────────────
 [os.symbols]
 Debian = "󰣚"
-Windows = "󰍲"
-Ubuntu = "󰕈"
-SUSE = ""
-Raspbian = "󰐿"
-Mint = "󰣭"
-Macos = "󰀵"
-Manjaro = ""
-Linux = "󰌽"
-Gentoo = "󰣨"
-Fedora = "󰣛"
-Alpine = ""
-Amazon = ""
-Android = ""
-Arch = "󰣇"
-Artix = "󰣇"
-CentOS = ""
-EndeavourOS = ""
-Redhat = "󱄛"
-NixOS = "󱄅"
 TOML
+    info "Appended new [os.symbols] block with Debian symbol."
+fi
 
 chown "${REAL_USER}:${REAL_USER}" "$STARSHIP_CFG" 2>/dev/null || true
 success "Gruvbox Rainbow preset written to ${STARSHIP_CFG}."
@@ -1252,64 +1246,85 @@ safe_install "GNOME Shell extensions" \
 
 info "Installing Gruvbox-GTK-Theme (Minimal variant)..."
 
-GRUVBOX_THEME_DIR="/usr/share/themes/Gruvbox-Dark-BL"   # BL = Border-Left (Minimal style)
 GRUVBOX_REPO_URL="https://github.com/Fausto-Korpsvart/Gruvbox-GTK-Theme"
 GRUVBOX_TMP="/tmp/gruvbox-gtk-theme"
 
-# Clone the repo (shallow, no history needed)
-if [[ -d "$GRUVBOX_TMP" ]]; then
+# The Gruvbox-GTK-Theme repo ships SCSS source — there is NO pre-built themes/
+# directory. Themes must be compiled with sassc via the bundled install.sh.
+# Ensure sassc is installed (build dependency for the theme compiler).
+DEBIAN_FRONTEND=noninteractive apt-get install -y sassc 2>/dev/null \
+    || warn "sassc could not be installed — Gruvbox theme build may fail."
+
+# Clean any stale temp clone
+[[ -d "$GRUVBOX_TMP" ]] && rm -rf "$GRUVBOX_TMP"
+
+if git clone --depth=1 --single-branch --branch main \
+    "$GRUVBOX_REPO_URL" "$GRUVBOX_TMP"; then
+
+    # Verify install.sh exists in the repo
+    if [[ ! -f "${GRUVBOX_TMP}/install.sh" ]]; then
+        warn "install.sh not found in cloned repo — repository structure may have changed."
+        warn "Falling back to Yaru-dark."
+        GRUVBOX_INSTALL_FAILED=true
+    else
+        chmod +x "${GRUVBOX_TMP}/install.sh"
+
+        # Build and install dark variant to /usr/share/themes
+        # Flags:
+        #   -d /usr/share/themes  install system-wide
+        #   -c dark               dark colour variant only
+        #   --tweaks noborder     "Minimal" — flat window borders, no radius
+        info "Building Gruvbox-Dark theme (this runs sassc, may take ~30s)..."
+        bash "${GRUVBOX_TMP}/install.sh" \
+            --dest /usr/share/themes \
+            --color dark \
+            --tweaks noborder \
+            2>&1 | grep -E "Installing|Removing|Error|error" || true
+
+        # The above installs a theme named "Gruvbox-Dark" by default.
+        # Verify at least one Gruvbox theme directory was created.
+        if ls /usr/share/themes/Gruvbox* &>/dev/null; then
+            # Use whichever dark theme was installed (prefer noborder variant)
+            INSTALLED_THEME=$(ls -d /usr/share/themes/Gruvbox*Dark* 2>/dev/null \
+                | head -1 | xargs basename 2>/dev/null || echo "Gruvbox-Dark")
+            # Override the GTK_THEME variable to match what was actually installed
+            GTK_THEME="$INSTALLED_THEME"
+            SHELL_THEME="$INSTALLED_THEME"
+            info "Gruvbox theme installed as: ${GTK_THEME}"
+        else
+            warn "Gruvbox theme directories not found after install.sh ran."
+            GRUVBOX_INSTALL_FAILED=true
+        fi
+
+        # ── Copy wallpapers if present ────────────────────────────────────
+        GRUVBOX_WALLPAPER_DIR="/usr/share/backgrounds/gruvbox"
+        mkdir -p "$GRUVBOX_WALLPAPER_DIR"
+        for wdir in wallpapers backgrounds; do
+            if [[ -d "${GRUVBOX_TMP}/${wdir}" ]]; then
+                cp -r "${GRUVBOX_TMP}/${wdir}"/. "$GRUVBOX_WALLPAPER_DIR/"
+                info "Gruvbox wallpapers copied to ${GRUVBOX_WALLPAPER_DIR}."
+                break
+            fi
+        done
+    fi
+
     rm -rf "$GRUVBOX_TMP"
-fi
-
-if git clone --depth=1 \
-    --single-branch --branch main \
-    "$GRUVBOX_REPO_URL" "$GRUVBOX_TMP" 2>/dev/null; then
-
-    # ── Install GTK 2/3/4 themes ───────────────────────────────────────────
-    # The repo ships pre-built theme directories under themes/
-    # Copy all Gruvbox-Dark variants to /usr/share/themes/
-    if [[ -d "${GRUVBOX_TMP}/themes" ]]; then
-        find "${GRUVBOX_TMP}/themes" -maxdepth 1 -type d -name 'Gruvbox*' \
-            | while read -r theme_dir; do
-                theme_name="$(basename "$theme_dir")"
-                rm -rf "/usr/share/themes/${theme_name}"
-                cp -r "$theme_dir" "/usr/share/themes/${theme_name}"
-                info "Installed GTK theme: ${theme_name}"
-              done
-    fi
-
-    # ── Install GNOME Shell theme ──────────────────────────────────────────
-    # Shell themes live under themes/<variant>/gnome-shell/
-    # We use the Gruvbox-Dark-BL-GS (BL = no roundness, GS = GNOME Shell)
-    # Copy to /usr/share/themes so the User Theme extension can find it.
-    GNOME_SHELL_THEME_SRC="${GRUVBOX_TMP}/themes/Gruvbox-Dark-BL"
-    if [[ -d "${GNOME_SHELL_THEME_SRC}/gnome-shell" ]]; then
-        info "GNOME Shell theme is bundled inside Gruvbox-Dark-BL — already installed."
-    fi
-
-    # ── Install wallpaper(s) included in the repo ──────────────────────────
-    GRUVBOX_WALLPAPER_DIR="/usr/share/backgrounds/gruvbox"
-    mkdir -p "$GRUVBOX_WALLPAPER_DIR"
-    if [[ -d "${GRUVBOX_TMP}/wallpapers" ]]; then
-        cp -r "${GRUVBOX_TMP}/wallpapers"/. "$GRUVBOX_WALLPAPER_DIR/"
-        info "Gruvbox wallpapers installed to ${GRUVBOX_WALLPAPER_DIR}."
-    elif [[ -d "${GRUVBOX_TMP}/backgrounds" ]]; then
-        cp -r "${GRUVBOX_TMP}/backgrounds"/. "$GRUVBOX_WALLPAPER_DIR/"
-        info "Gruvbox backgrounds installed to ${GRUVBOX_WALLPAPER_DIR}."
-    fi
-
-    rm -rf "$GRUVBOX_TMP"
-    success "Gruvbox-GTK-Theme installed (Dark-BL / Minimal variant)."
+    [[ "${GRUVBOX_INSTALL_FAILED:-false}" == "false" ]] \
+        && success "Gruvbox-GTK-Theme built and installed (${GTK_THEME})."
 else
-    warn "Could not clone Gruvbox-GTK-Theme from GitHub."
-    warn "You can install it manually later from: ${GRUVBOX_REPO_URL}"
+    warn "Could not clone Gruvbox-GTK-Theme from GitHub (network issue?)."
+    warn "Install manually later: git clone ${GRUVBOX_REPO_URL}"
+    warn "  Then: bash install.sh --dest /usr/share/themes --color dark --tweaks noborder"
     warn "Falling back to Yaru-dark for all theme settings."
     GRUVBOX_INSTALL_FAILED=true
 fi
 
 GRUVBOX_INSTALL_FAILED="${GRUVBOX_INSTALL_FAILED:-false}"
 
-# ── Resolve theme names to use (Gruvbox if available, Yaru-dark fallback) ─
+# ── Resolve final theme names ─────────────────────────────────────────────
+# GTK_THEME / SHELL_THEME are set dynamically by the install block above
+# (based on what install.sh actually created). Fall back to Yaru-dark if
+# the Gruvbox install failed or the variable was never set.
 if [[ "$GRUVBOX_INSTALL_FAILED" == "true" ]]; then
     GTK_THEME="Yaru-dark"
     SHELL_THEME="Yaru-dark"
@@ -1317,11 +1332,12 @@ if [[ "$GRUVBOX_INSTALL_FAILED" == "true" ]]; then
     CURSOR_THEME="Yaru"
     info "Using fallback theme: Yaru-dark"
 else
-    GTK_THEME="Gruvbox-Dark-BL"
-    SHELL_THEME="Gruvbox-Dark-BL"
+    # Use what install.sh produced; default to "Gruvbox-Dark" if unset
+    GTK_THEME="${GTK_THEME:-Gruvbox-Dark}"
+    SHELL_THEME="${SHELL_THEME:-${GTK_THEME}}"
     ICON_THEME="Papirus-Dark"
-    CURSOR_THEME="Yaru"      # Yaru cursor is clean and neutral — Gruvbox has no cursor theme
-    info "Using Gruvbox-Dark-BL (Minimal) + Papirus-Dark icons."
+    CURSOR_THEME="Yaru"      # Yaru cursor is clean/neutral — no Gruvbox cursor theme
+    info "Using Gruvbox theme: ${GTK_THEME} + Papirus-Dark icons."
 fi
 
 # ── 23.6  Apply gsettings ─────────────────────────────────────────────────────
@@ -1554,7 +1570,7 @@ echo -e "${GRN}║  ✓  UFW firewall + fail2ban                                
 echo -e "${GRN}║  ✓  Flatpak + Flathub                                      ║${RST}"
 echo -e "${GRN}║  ✓  zsh + Oh My Zsh + Starship Gruvbox Rainbow             ║${RST}"
 echo -e "${GRN}║  ✓  JetBrainsMono Nerd Font (system-wide)                  ║${RST}"
-echo -e "${GRN}║  ✓  Gruvbox-Dark-BL (Minimal) GTK/Shell + Papirus-Dark icons  ║${RST}"
+echo -e "${GRN}║  ✓  Gruvbox-Dark GTK/Shell (built via install.sh) + Papirus-Dark ║${RST}"
 echo -e "${GRN}║  ✓  APT cache cleaned up                                   ║${RST}"
 echo -e "${GRN}╠══════════════════════════════════════════════════════════════╣${RST}"
 echo -e "${YLW}║  NEXT STEPS (after reboot):                                  ║${RST}"
@@ -1562,7 +1578,7 @@ echo -e "${YLW}║  • Verify kernel : uname -r  (should show backported ver.) 
 echo -e "${YLW}║  • Open new terminal → zsh/Starship loads automatically     ║${RST}"
 echo -e "${YLW}║  • Set terminal font to: JetBrainsMono Nerd Font            ║${RST}"
 echo -e "${YLW}║  • Log out & back in to activate Yaru Shell + Dash-to-Dock  ║${RST}"
-echo -e "${YLW}║  • If Shell theme missing: Tweaks→Appearance→Shell→Gruvbox-Dark-BL ║${RST}"
+echo -e "${YLW}║  • Shell theme missing: Tweaks→Appearance→Shell→Gruvbox-Dark   ║${RST}"
 echo -e "${YLW}║  • Run: sensors           (thermal sensor readings)          ║${RST}"
 echo -e "${YLW}║  • Run: fwupdmgr update   (BIOS/firmware updates)           ║${RST}"
 echo -e "${YLW}║  • Run: vainfo            (verify hardware video decode)     ║${RST}"
