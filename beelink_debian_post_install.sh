@@ -320,7 +320,8 @@ step "Step 3 — Minimal GNOME desktop installation"
 #   gvfs gvfs-backends   — virtual filesystem (USB automount, network shares)
 #   xdg-utils            — xdg-open and MIME type handling
 #   xdg-user-dirs        — creates ~/Desktop, ~/Downloads, etc. on first login
-#   polkit               — authentication agent for privilege escalation
+#   polkitd              — policy kit daemon (renamed from polkit in Trixie)
+#   pkexec               — run commands with polkit authorization
 #   network-manager      — Wi-Fi / Ethernet management (nm-applet in GNOME)
 #   network-manager-gnome — NM system tray applet
 #   gnome-keyring        — secrets/password manager integrated into GNOME
@@ -345,8 +346,11 @@ GNOME_MINIMAL_PKGS=(
     xdg-utils
     xdg-user-dirs
     xdg-user-dirs-gtk
-    polkit
-    polkit-gnome
+    polkitd
+    pkexec
+    # Note: polkit-gnome was dropped from Debian Trixie.
+    # polkitd provides the D-Bus authority; GNOME Shell uses its own built-in
+    # auth agent for desktop sessions (no separate agent package needed).
     # Networking
     network-manager
     network-manager-gnome
@@ -485,8 +489,7 @@ AMD_GPU_PKGS=(
     mesa-va-drivers             # VA-API hardware video decode
     libva-utils                 # vainfo tool
     vulkan-tools                # vulkaninfo tool
-    radeontop                   # GPU monitoring
-    rocm-smi                    # ROCm system management CLI
+    radeontop                   # GPU monitoring (AMD-specific, in Trixie main)
 )
 
 safe_install "AMD GPU firmware and Mesa drivers" "${AMD_GPU_PKGS[@]}"
@@ -639,7 +642,6 @@ safe_install "PipeWire audio stack" \
     gstreamer1.0-pipewire \
     pavucontrol \
     alsa-utils \
-    alsa-firmware-loaders \
     sof-firmware
 
 # The Ryzen 8845HS uses SOF (Sound Open Firmware) for audio
@@ -1207,7 +1209,7 @@ safe_install "Yaru theme base" \
     yaru-theme-icon \
     yaru-theme-sound \
     gnome-themes-extra \
-    adwaita-icon-theme-full \
+    adwaita-icon-theme \
     gtk2-engines-murrine \
     gtk2-engines-pixbuf
 
