@@ -237,23 +237,41 @@ if [[ -z "$BPO_KERNEL_VERSION" || "$BPO_KERNEL_VERSION" == "(none)" ]]; then
 else
     info "Backported kernel candidate: linux-image-amd64 ${BPO_KERNEL_VERSION}"
 
-    # Install meta-package + headers from backports
+    # Install meta-packages from backports.
+    # Package breakdown:
+    #   linux-image-amd64    — meta-package tracking the latest amd64 kernel in the repo
+    #   linux-headers-amd64  — meta-package pulling in matching versioned headers
+    #   firmware-amd-graphics — backported GPU firmware blobs (780M needs newer ones)
+    #   dkms                 — Dynamic Kernel Module Support (rebuilds out-of-tree
+    #                          modules automatically on kernel upgrades)
+    #   make gcc             — build toolchain required by DKMS to compile modules;
+    #                          these are standard packages that exist in Trixie main
+    #
+    # NOTE: There is NO "linux-compiler-gcc-*" package in Debian Trixie.
+    # DKMS uses the system GCC (gcc meta-package → gcc-14 on Trixie) directly.
     DEBIAN_FRONTEND=noninteractive apt-get install -y \
         -t "${DISTRO_CODENAME}-backports" \
         -o Dpkg::Options::="--force-confdef" \
         -o Dpkg::Options::="--force-confold" \
         linux-image-amd64 \
         linux-headers-amd64 \
-        linux-compiler-gcc-14-x86 \
         firmware-amd-graphics
-    # linux-compiler-gcc-14-x86 ensures DKMS modules (e.g. VirtualBox, ZFS) can
-    # rebuild against the new headers without a toolchain mismatch.
 
-    # Pin the backported kernel meta-package so apt upgrade won't touch it.
-    # The pin uses the package name pattern; the meta-package handles version bumps.
+    # Install DKMS build dependencies from the standard (non-backports) repo.
+    # gcc, make, and dkms are in Trixie main and do not need -t backports.
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        -o Dpkg::Options::="--force-confdef" \
+        -o Dpkg::Options::="--force-confold" \
+        dkms \
+        gcc \
+        make
+
+    # Pin linux-image-amd64 and linux-headers-amd64 to the backports track so
+    # future `apt upgrade` runs continue pulling kernel updates from backports
+    # rather than regressing to the Trixie stable kernel version.
     deploy_config /etc/apt/preferences.d/98-backports-kernel << EOF
-# Keep linux-image-amd64 and linux-headers-amd64 on the backports track
-Package: linux-image-amd64 linux-headers-amd64 linux-compiler-gcc-14-x86
+# Keep kernel meta-packages on the trixie-backports track
+Package: linux-image-amd64 linux-headers-amd64
 Pin: release a=${DISTRO_CODENAME}-backports
 Pin-Priority: 900
 EOF
