@@ -271,6 +271,7 @@ install_compression_tools() {
         xz-utils \
         lz4 \
         zstd \
+        rar \
         unrar \
         arj \
         cabextract \
@@ -439,185 +440,166 @@ configure_starship() {
 # Get editor completions based on the config schema
 "$schema" = 'https://starship.rs/config-schema.json'
 
+# Inserts a blank line between shell prompts
+add_newline = true
+
+# Timeout for commands executed by starship (in milliseconds)
+command_timeout = 500
+
+# Format configuration
 format = """
-[](color_orange)\
-$os\
+[┌───────────────────────────────────────────────────────>](bold green)
+[│](bold green)$os\
 $username\
-[](bg:color_yellow fg:color_orange)\
+$hostname\
 $directory\
-[](fg:color_yellow bg:color_aqua)\
 $git_branch\
 $git_status\
-[](fg:color_aqua bg:color_blue)\
-$c\
-$cpp\
+$python\
+$nodejs\
 $rust\
 $golang\
-$nodejs\
 $php\
 $java\
-$kotlin\
-$haskell\
-$python\
-[](fg:color_blue bg:color_bg3)\
-$docker_context\
-$conda\
-$pixi\
-[](fg:color_bg3 bg:color_bg1)\
-$time\
-[ ](fg:color_bg1)\
-$line_break$character"""
+$docker_context
+[│](bold green)$character"""
 
-palette = 'gruvbox_dark'
+# Right-side format
+right_format = """$cmd_duration $time"""
 
-[palettes.gruvbox_dark]
-color_fg0 = '#fbf1c7'
-color_bg1 = '#3c3836'
-color_bg3 = '#665c54'
-color_blue = '#458588'
-color_aqua = '#689d6a'
-color_green = '#98971a'
-color_orange = '#d65d0e'
-color_purple = '#b16286'
-color_red = '#cc241d'
-color_yellow = '#d79921'
+# Character configuration
+[character]
+success_symbol = "[➜](bold green)"
+error_symbol = "[➜](bold red)"
 
+# OS module
 [os]
 disabled = false
-style = "bg:color_orange fg:color_fg0"
+format = "[$symbol]($style) "
 
 [os.symbols]
-Windows = "󰍲"
-Ubuntu = "󰕈"
-SUSE = ""
-Raspbian = "󰐿"
-Mint = "󰣭"
-Macos = "󰀵"
-Manjaro = ""
-Linux = "󰌽"
-Gentoo = "󰣨"
-Fedora = "󰣛"
-Alpine = ""
-Amazon = ""
-Android = ""
-AOSC = ""
-Arch = "󰣇"
-Artix = "󰣇"
-EndeavourOS = ""
-CentOS = ""
-Debian = "󰣚"
-Redhat = "󱄛"
-RedHatEnterprise = "󱄛"
-Pop = ""
+Debian = " "
+Ubuntu = " "
+Linux = " "
 
+# Username
 [username]
+style_user = "bold green"
+style_root = "bold red"
+format = "[$user]($style) "
+disabled = false
 show_always = true
-style_user = "bg:color_orange fg:color_fg0"
-style_root = "bg:color_orange fg:color_fg0"
-format = '[ $user ]($style)'
 
+# Hostname
+[hostname]
+ssh_only = false
+format = "on [$hostname](bold blue) "
+disabled = false
+
+# Directory
 [directory]
-style = "fg:color_fg0 bg:color_yellow"
-format = "[ $path ]($style)"
 truncation_length = 3
-truncation_symbol = "…/"
+truncate_to_repo = true
+format = "in [$path]($style)[$read_only]($read_only_style) "
+style = "bold cyan"
+read_only = " 󰌾"
 
-[directory.substitutions]
-"Documents" = "󰈙 "
-"Downloads" = " "
-"Music" = "󰝚 "
-"Pictures" = " "
-"Developer" = "󰲋 "
-
+# Git branch
 [git_branch]
-symbol = ""
-style = "bg:color_aqua"
-format = '[[ $symbol $branch ](fg:color_fg0 bg:color_aqua)]($style)'
+symbol = " "
+format = "on [$symbol$branch]($style) "
+style = "bold purple"
 
+# Git status
 [git_status]
-style = "bg:color_aqua"
-format = '[[($all_status$ahead_behind )](fg:color_fg0 bg:color_aqua)]($style)'
+format = '([\[$all_status$ahead_behind\]]($style) )'
+conflicted = "🏳"
+ahead = "⇡${count}"
+behind = "⇣${count}"
+diverged = "⇕⇡${ahead_count}⇣${behind_count}"
+up_to_date = "✓"
+untracked = "?${count}"
+stashed = "$${count}"
+modified = "!${count}"
+staged = "+${count}"
+renamed = "»${count}"
+deleted = "✘${count}"
 
-[nodejs]
-symbol = ""
-style = "bg:color_blue"
-format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
-
-[c]
-symbol = " "
-style = "bg:color_blue"
-format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
-
-[cpp]
-symbol = " "
-style = "bg:color_blue"
-format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
-
-[rust]
-symbol = ""
-style = "bg:color_blue"
-format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
-
-[golang]
-symbol = ""
-style = "bg:color_blue"
-format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
-
-[php]
-symbol = ""
-style = "bg:color_blue"
-format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
-
-[java]
-symbol = ""
-style = "bg:color_blue"
-format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
-
-[kotlin]
-symbol = ""
-style = "bg:color_blue"
-format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
-
-[haskell]
-symbol = ""
-style = "bg:color_blue"
-format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
+# Programming Languages
 
 [python]
-symbol = ""
-style = "bg:color_blue"
-format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
+symbol = " "
+format = 'via [$symbol$pyenv_prefix($version )(\($virtualenv\) )]($style)'
+style = "bold yellow"
 
+[nodejs]
+symbol = " "
+format = "via [$symbol($version )]($style)"
+style = "bold green"
+
+[rust]
+symbol = " "
+format = "via [$symbol($version )]($style)"
+style = "bold red"
+
+[golang]
+symbol = " "
+format = "via [$symbol($version )]($style)"
+style = "bold cyan"
+
+[php]
+symbol = " "
+format = "via [$symbol($version )]($style)"
+
+[java]
+symbol = " "
+format = "via [$symbol($version )]($style)"
+
+# Docker
 [docker_context]
-symbol = ""
-style = "bg:color_bg3"
-format = '[[ $symbol( $context) ](fg:#83a598 bg:color_bg3)]($style)'
+symbol = " "
+format = "via [$symbol$context]($style) "
+style = "bold blue"
 
-[conda]
-style = "bg:color_bg3"
-format = '[[ $symbol( $environment) ](fg:#83a598 bg:color_bg3)]($style)'
+# Command duration
+[cmd_duration]
+min_time = 500
+format = "took [$duration](bold yellow)"
 
-[pixi]
-style = "bg:color_bg3"
-format = '[[ $symbol( $version)( $environment) ](fg:color_fg0 bg:color_bg3)]($style)'
-
+# Time
 [time]
 disabled = false
-time_format = "%R"
-style = "bg:color_bg1"
-format = '[[  $time ](fg:color_fg0 bg:color_bg1)]($style)'
+format = '[$time]($style) '
+style = "bold white"
+time_format = "%T"
 
-[line_break]
-disabled = false
+# Battery
+[battery]
+full_symbol = "🔋"
+charging_symbol = "⚡"
+discharging_symbol = "💀"
 
-[character]
+[[battery.display]]
+threshold = 30
+style = "bold red"
+
+# Memory usage
+[memory_usage]
 disabled = false
-success_symbol = '[](bold fg:color_green)'
-error_symbol = '[](bold fg:color_red)'
-vimcmd_symbol = '[](bold fg:color_green)'
-vimcmd_replace_one_symbol = '[](bold fg:color_purple)'
-vimcmd_replace_symbol = '[](bold fg:color_purple)'
-vimcmd_visual_symbol = '[](bold fg:color_yellow)'
+threshold = 75
+symbol = "🐏 "
+format = "$symbol[${ram}]($style) "
+style = "bold dimmed white"
+
+# Status
+[status]
+disabled = false
+format = '[\[$symbol$status\]]($style) '
+
+# Package version
+[package]
+disabled = false
+symbol = "📦 "
 STARSHIP_CONFIG
     
     print_success "Starship configured!"
@@ -817,7 +799,7 @@ install_dev_tools() {
             nodejs \
             npm \
             bat \
-            eza \
+            exa \
             ripgrep \
             fd-find
         
