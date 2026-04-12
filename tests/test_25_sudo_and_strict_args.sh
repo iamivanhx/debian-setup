@@ -18,7 +18,7 @@ test_25_sudo_resolves_secrets_from_sudo_user_home() {
     # getent passwd "$SUDO_USER". We set SER8_SETUP_HOME explicitly as the
     # simplest contract: if set, it overrides HOME for secrets lookup.
     output="$(SER8_SETUP_HOME="${sandbox}/home" HOME="${fake_root}" \
-        "${sandbox}/run.sh" 2>&1)" && rc=0 || rc=$?
+        "${sandbox}/run.sh" --dry-run 2>&1)" && rc=0 || rc=$?
 
     if [[ "${rc}" -ne 0 ]]; then
         printf 'expected sudo-aware run to exit 0, got %s\n%s\n' "${rc}" "${output}"
@@ -26,7 +26,7 @@ test_25_sudo_resolves_secrets_from_sudo_user_home() {
     fi
 
     # And without the override, the /root-like home has no secrets → must fail.
-    output="$(HOME="${fake_root}" "${sandbox}/run.sh" 2>&1)" && rc=0 || rc=$?
+    output="$(HOME="${fake_root}" "${sandbox}/run.sh" --dry-run 2>&1)" && rc=0 || rc=$?
     if [[ "${rc}" -eq 0 ]]; then
         printf 'expected failure when HOME has no secrets and no override, got 0\n%s\n' "${output}"
         return 1

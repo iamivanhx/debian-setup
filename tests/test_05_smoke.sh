@@ -10,7 +10,7 @@ test_05_smoke_runs_all_smoke_functions() {
     trap 'trap - RETURN; rm -rf -- "${sandbox}"' RETURN
     write_secrets "${sandbox}"
 
-    output="$(HOME="${sandbox}/home" "${sandbox}/run.sh" smoke 2>&1)" && rc=0 || rc=$?
+    output="$(HOME="${sandbox}/home" "${sandbox}/run.sh" --dry-run smoke 2>&1)" && rc=0 || rc=$?
 
     if [[ "${rc}" -ne 0 ]]; then
         printf 'expected exit 0, got %s\n' "${rc}"
@@ -39,7 +39,7 @@ test_06_smoke_single_module_runs_only_that() {
     trap 'trap - RETURN; rm -rf -- "${sandbox}"' RETURN
     write_secrets "${sandbox}"
 
-    output="$(HOME="${sandbox}/home" "${sandbox}/run.sh" smoke 20-storage 2>&1)" && rc=0 || rc=$?
+    output="$(HOME="${sandbox}/home" "${sandbox}/run.sh" --dry-run smoke 20-storage 2>&1)" && rc=0 || rc=$?
 
     if [[ "${rc}" -ne 0 ]]; then
         printf 'expected exit 0, got %s\n' "${rc}"

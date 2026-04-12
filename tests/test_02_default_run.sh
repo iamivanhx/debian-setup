@@ -10,7 +10,7 @@ test_02_default_run_iterates_all_modules() {
     trap 'trap - RETURN; rm -rf -- "${sandbox}"' RETURN
     write_secrets "${sandbox}"
 
-    output="$(HOME="${sandbox}/home" "${sandbox}/run.sh" 2>&1)" && rc=0 || rc=$?
+    output="$(HOME="${sandbox}/home" "${sandbox}/run.sh" --dry-run 2>&1)" && rc=0 || rc=$?
 
     if [[ "${rc}" -ne 0 ]]; then
         printf 'expected exit 0, got %s\n' "${rc}"

@@ -23,6 +23,7 @@ mk_sandbox() {
     dir="$(mktemp -d)"
     mkdir -p "${dir}/home/.config/ser8-setup"
     cp -r "${REPO_ROOT}/run.sh" "${REPO_ROOT}/lib" "${REPO_ROOT}/modules" "${dir}/" 2>/dev/null || true
+    cp -r "${REPO_ROOT}/templates" "${dir}/" 2>/dev/null || true
     echo "${dir}"
 }
 

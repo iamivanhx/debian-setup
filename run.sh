@@ -5,6 +5,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck source=lib/common.sh
 source "${REPO_ROOT}/lib/common.sh"
+# shellcheck source=lib/guards.sh
+source "${REPO_ROOT}/lib/guards.sh"
 
 SETUP_HOME="${SER8_SETUP_HOME:-}"
 if [[ -z "${SETUP_HOME}" && -n "${SUDO_USER:-}" ]]; then
@@ -26,6 +28,9 @@ if ! bash -n "${SECRETS_FILE}" 2>/dev/null; then
 fi
 # shellcheck source=/dev/null
 source "${SECRETS_FILE}"
+
+TIMEZONE="${TIMEZONE:-Europe/Madrid}"
+export TIMEZONE
 
 DRY_RUN=0
 if [[ "${1:-}" == "--dry-run" ]]; then
