@@ -35,6 +35,14 @@ sudo ./run.sh
 sudo ./run.sh <module>          # e.g. ./run.sh 20-base
 ```
 
+## Pre-commit hook
+
+Install the hook once after cloning:
+
+```sh
+ln -sf ../../scripts/pre-commit.sh .git/hooks/pre-commit
+```
+
 ---
 
 ## Subcommands
@@ -59,3 +67,11 @@ sudo ./run.sh <module>          # e.g. ./run.sh 20-base
 - [ ] Phase 3: Lab + Backup + Disaster Drill
 - [ ] Phase 4: Resilience — monitoring, auto-updates, drift detection
 - [ ] Phase 5: Acceptance — full walk of docs/acceptance.md on real hardware
+
+---
+
+## Documentation
+
+- [docs/install.md](docs/install.md) — step-by-step Debian 13 netinst procedure
+- [docs/recovery.md](docs/recovery.md) — disaster recovery runbook
+- [docs/projects.md](docs/projects.md) — how to add a Docker lab project

@@ -26,6 +26,21 @@ mk_sandbox() {
     echo "${dir}"
 }
 
+# Initialise a git repo in the current directory with a test identity,
+# create lib/ and scripts/, and install the pre-commit hook from the
+# given repo root. Must be called from inside the target directory.
+# Usage (inside a subshell that has already cd'd into the sandbox):
+#   mk_git_sandbox "${REPO_ROOT}"
+mk_git_sandbox() {
+    local repo_root="$1"
+    git init -q
+    git config user.name "Test User"
+    git config user.email "test@example.com"
+    mkdir -p lib scripts
+    cp "${repo_root}/scripts/pre-commit.sh" scripts/pre-commit.sh
+    chmod +x scripts/pre-commit.sh
+}
+
 # Write a valid stub secrets.env into a sandbox.
 write_secrets() {
     local sandbox="$1"
