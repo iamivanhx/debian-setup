@@ -1,0 +1,7 @@
+Package: linux-image-*
+Pin: release a=trixie-backports
+Pin-Priority: 900
+
+Package: linux-headers-*
+Pin: release a=trixie-backports
+Pin-Priority: 900

@@ -1,0 +1,3 @@
+Package: firmware-amd-graphics
+Pin: release a=trixie-backports
+Pin-Priority: 900

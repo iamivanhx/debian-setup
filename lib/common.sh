@@ -78,3 +78,19 @@ dry_run_echo() {
     fi
     return 1
 }
+
+# Deploy a template file to its destination if the destination does not already
+# match the template.  The template path is derived as:
+#   ${REPO_ROOT}/templates${dest}
+# so the caller only needs to supply the destination path.
+# An optional second argument overrides the dry-run message description.
+#   Example: deploy_template /etc/apt/preferences.d/backports "backports pin priority"
+deploy_template() {
+    local dest="$1"
+    local desc="${2:-${dest}}"
+    local template="${REPO_ROOT}/templates${dest}"
+    if ! guard::file_matches_template "${dest}" "${template}"; then
+        dry_run_echo "would deploy ${dest} (${desc})" || \
+            deploy_config "${dest}" < "${template}"
+    fi
+}

@@ -32,6 +32,9 @@ source "${SECRETS_FILE}"
 TIMEZONE="${TIMEZONE:-Europe/Madrid}"
 export TIMEZONE
 
+POWER_PROFILE="${POWER_PROFILE:-balanced}"
+export POWER_PROFILE
+
 DRY_RUN=0
 if [[ "${1:-}" == "--dry-run" ]]; then
     DRY_RUN=1

@@ -15,21 +15,8 @@ fi
 # ---------------------------------------------------------------------------
 # 1. Backports config deployment
 # ---------------------------------------------------------------------------
-if ! guard::file_matches_template \
-        /etc/apt/sources.list.d/backports.list \
-        "${REPO_ROOT}/templates/etc/apt/sources.list.d/backports.list"; then
-    dry_run_echo "would deploy backports.list (backports apt source)" || \
-        deploy_config /etc/apt/sources.list.d/backports.list \
-            < "${REPO_ROOT}/templates/etc/apt/sources.list.d/backports.list"
-fi
-
-if ! guard::file_matches_template \
-        /etc/apt/preferences.d/backports \
-        "${REPO_ROOT}/templates/etc/apt/preferences.d/backports"; then
-    dry_run_echo "would deploy backports preferences (backports pin priority)" || \
-        deploy_config /etc/apt/preferences.d/backports \
-            < "${REPO_ROOT}/templates/etc/apt/preferences.d/backports"
-fi
+deploy_template /etc/apt/sources.list.d/backports.list "backports apt source"
+deploy_template /etc/apt/preferences.d/backports "backports pin priority"
 
 # ---------------------------------------------------------------------------
 # 2. apt update & upgrade

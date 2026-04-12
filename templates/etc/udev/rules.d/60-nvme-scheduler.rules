@@ -1,0 +1,4 @@
+# I/O scheduler for NVMe SSDs — none bypasses software scheduling for hardware queues
+ACTION=="add|change", KERNEL=="nvme[0-9]*", ATTR{queue/scheduler}="none"
+# Allow NVMe autonomous power state transitions (APST) — saves ~0.5-1W idle
+ACTION=="add", SUBSYSTEM=="nvme", ATTR{power/control}="auto"
