@@ -83,3 +83,49 @@ test_14_deploy_config_writes_and_backs_up() {
 
     return 0
 }
+
+test_17_deploy_template_empty_dest_errors() {
+    local stderr_file
+    stderr_file="$(mktemp)"
+    trap 'rm -f -- "${stderr_file}"' RETURN
+
+    if bash -c "
+        set -euo pipefail
+        REPO_ROOT='${REPO_ROOT}'
+        source '${REPO_ROOT}/lib/guards.sh'
+        source '${REPO_ROOT}/lib/common.sh'
+        deploy_template ''
+    " >/dev/null 2>"${stderr_file}"; then
+        printf 'deploy_template with empty dest should exit non-zero\n'
+        return 1
+    fi
+
+    if ! grep -qi 'dest' "${stderr_file}"; then
+        printf 'expected stderr to mention dest, got: %s\n' "$(cat "${stderr_file}")"
+        return 1
+    fi
+}
+
+test_18_deploy_template_missing_template_errors() {
+    local tmp stderr_file dest
+    tmp="$(mktemp -d)"
+    stderr_file="$(mktemp)"
+    trap 'rm -rf -- "${tmp}"; rm -f -- "${stderr_file}"' RETURN
+    dest="${tmp}/missing-template.conf"
+
+    if bash -c "
+        set -euo pipefail
+        REPO_ROOT='${REPO_ROOT}'
+        source '${REPO_ROOT}/lib/guards.sh'
+        source '${REPO_ROOT}/lib/common.sh'
+        deploy_template '${dest}'
+    " >/dev/null 2>"${stderr_file}"; then
+        printf 'deploy_template with a missing template should exit non-zero\n'
+        return 1
+    fi
+
+    if ! grep -q '\[ERROR\]' "${stderr_file}"; then
+        printf 'expected an [ERROR] message for missing template, got: %s\n' "$(cat "${stderr_file}")"
+        return 1
+    fi
+}

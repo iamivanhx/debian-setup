@@ -86,9 +86,11 @@ dry_run_echo() {
 # An optional second argument overrides the dry-run message description.
 #   Example: deploy_template /etc/apt/preferences.d/backports "backports pin priority"
 deploy_template() {
-    local dest="$1"
+    local dest="${1:-}"
+    [[ -n "${dest}" ]] || error "deploy_template: dest argument must not be empty"
     local desc="${2:-${dest}}"
     local template="${REPO_ROOT}/templates${dest}"
+    [[ -f "${template}" ]] || error "deploy_template: template not found: ${template}"
     if ! guard::file_matches_template "${dest}" "${template}"; then
         dry_run_echo "would deploy ${dest} (${desc})" || \
             deploy_config "${dest}" < "${template}"

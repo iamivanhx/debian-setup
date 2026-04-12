@@ -15,9 +15,27 @@ deploy_template /etc/apt/preferences.d/kernel-backports "kernel backports pin"
 deploy_template /etc/apt/preferences.d/firmware-amd-backports "AMD firmware backports pin"
 
 # ---------------------------------------------------------------------------
-# 3. NVMe scheduler udev rule
+# 3. NVMe scheduler udev rule + legacy cleanup + conditional reload
 # ---------------------------------------------------------------------------
-deploy_template /etc/udev/rules.d/60-nvme-scheduler.rules "NVMe I/O scheduler udev rule"
+_udev_changed=0
+
+if ! guard::file_matches_template /etc/udev/rules.d/60-nvme-scheduler.rules \
+        "${REPO_ROOT}/templates/etc/udev/rules.d/60-nvme-scheduler.rules"; then
+    deploy_template /etc/udev/rules.d/60-nvme-scheduler.rules "NVMe I/O scheduler udev rule"
+    _udev_changed=1
+fi
+
+# Remove legacy rule BEFORE reloading so stale rules are not loaded
+if guard::file_exists /etc/udev/rules.d/60-nvme-ioscheduler.rules; then
+    dry_run_echo "would remove legacy /etc/udev/rules.d/60-nvme-ioscheduler.rules" || \
+        rm -f /etc/udev/rules.d/60-nvme-ioscheduler.rules
+    _udev_changed=1
+fi
+
+if [[ "${_udev_changed}" -eq 1 ]]; then
+    dry_run_echo "would reload udev rules (udevadm control --reload-rules && udevadm trigger)" || \
+        { udevadm control --reload-rules && udevadm trigger; }
+fi
 
 # ---------------------------------------------------------------------------
 # 4a. Backports-pinned packages — install or upgrade to backports version
@@ -118,6 +136,15 @@ smoke_10_hardware() {
             "${REPO_ROOT}/templates/etc/udev/rules.d/60-nvme-scheduler.rules" \
         || { echo "smoke: nvme udev scheduler rule does not match template" >&2; return 1; }
 
+    ! guard::file_exists /etc/udev/rules.d/60-nvme-ioscheduler.rules \
+        || { echo "smoke: legacy 60-nvme-ioscheduler.rules still present" >&2; return 1; }
+
+    guard::service_enabled fwupd \
+        || { echo "smoke: fwupd.service is not enabled" >&2; return 1; }
+
+    guard::service_enabled power-profiles-daemon \
+        || { echo "smoke: power-profiles-daemon.service is not enabled" >&2; return 1; }
+
     guard::service_active power-profiles-daemon \
         || { echo "smoke: power-profiles-daemon is not active" >&2; return 1; }
 
@@ -126,6 +153,8 @@ smoke_10_hardware() {
     [[ "${_current_profile}" == "${POWER_PROFILE}" ]] \
         || { echo "smoke: power profile is '${_current_profile}', expected '${POWER_PROFILE}'" >&2; return 1; }
 
+    # Advisory only: a fresh install legitimately has one kernel; enforcing ≥2
+    # would fail on first run. Warn so the operator notices, but don't block.
     local _kernel_count
     _kernel_count="$(dpkg -l 'linux-image-[0-9]*' 2>/dev/null | grep -c '^ii' || true)"
     if [[ "${_kernel_count}" -lt 2 ]]; then

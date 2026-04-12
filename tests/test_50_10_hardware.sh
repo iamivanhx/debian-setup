@@ -199,3 +199,62 @@ test_55_smoke_10_hardware_is_nontrivial() {
 
     return 0
 }
+
+test_56_dry_run_mentions_udevadm_reload() {
+    local sandbox output rc
+    sandbox="$(mk_sandbox)"
+    trap 'trap - RETURN; rm -rf -- "${sandbox}"' RETURN
+    write_secrets "${sandbox}"
+    output="$(HOME="${sandbox}/home" "${sandbox}/run.sh" --dry-run 10-hardware 2>&1)" && rc=0 || rc=$?
+    if [[ "${rc}" -ne 0 ]]; then
+        printf 'expected exit 0 in dry-run mode, got %s\n' "${rc}"
+        printf '%s\n' "${output}"
+        return 1
+    fi
+    if [[ "${output}" != *"udevadm"* ]]; then
+        printf "expected 'udevadm' in output to indicate udev rules reload\n"
+        printf '%s\n' "${output}"
+        return 1
+    fi
+    return 0
+}
+
+test_57_module_handles_legacy_nvme_ioscheduler_rule() {
+    local module_file="${REPO_ROOT}/modules/10-hardware.sh"
+
+    if [[ ! -f "${module_file}" ]]; then
+        printf 'file not found: %s\n' "${module_file}"
+        return 1
+    fi
+
+    if ! grep -Fq '60-nvme-ioscheduler.rules' "${module_file}"; then
+        printf "expected legacy NVMe ioscheduler rule reference in %s\n" "${module_file}"
+        return 1
+    fi
+
+    return 0
+}
+
+test_58_smoke_checks_fwupd_service_enabled() {
+    local body
+
+    body="$(
+        awk '
+            /^smoke_10_hardware\(\)[[:space:]]*\{/ { in_fn=1 }
+            in_fn { print }
+            in_fn && /^[[:space:]]*}[[:space:]]*$/ { exit }
+        ' "${REPO_ROOT}/modules/10-hardware.sh"
+    )"
+
+    if [[ -z "${body}" ]]; then
+        printf 'smoke_10_hardware not found in modules/10-hardware.sh\n'
+        return 1
+    fi
+
+    if ! echo "${body}" | grep -q 'guard::service_enabled.*fwupd\|fwupd.*service_enabled'; then
+        printf "missing guard::service_enabled fwupd check in smoke_10_hardware\n"
+        return 1
+    fi
+
+    return 0
+}
