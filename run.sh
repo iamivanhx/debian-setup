@@ -35,6 +35,9 @@ export TIMEZONE
 POWER_PROFILE="${POWER_PROFILE:-balanced}"
 export POWER_PROFILE
 
+NVME2_DEVICE="${NVME2_DEVICE:-/dev/nvme1n1}"
+export NVME2_DEVICE
+
 DRY_RUN=0
 if [[ "${1:-}" == "--dry-run" ]]; then
     DRY_RUN=1

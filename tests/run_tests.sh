@@ -47,6 +47,7 @@ write_secrets() {
     local sandbox="$1"
     cat > "${sandbox}/home/.config/ser8-setup/secrets.env" <<'EOF'
 # stub secrets for tests
+NVME2_LUKS_PASSPHRASE="test-passphrase-not-for-production"
 EOF
 }
 
