@@ -141,10 +141,10 @@ smoke_60_dev() {
     guard::command_exists code \
         || { echo "smoke: code not on PATH" >&2; return 1; }
 
-    # Apt-mark hold of ruby/ruby-full (set in 00-base) — assert here too since
+    # Apt-mark hold of ruby (set in 00-base) — assert here too since
     # 60-dev is the module that depends on mise winning over apt's ruby.
     local h
-    for h in ruby ruby-full; do
+    for h in ruby; do
         if dpkg-query -W "${h}" &>/dev/null; then
             apt-mark showhold | grep -qxF "${h}" \
                 || { echo "smoke: ${h} is installed but not held" >&2; return 1; }

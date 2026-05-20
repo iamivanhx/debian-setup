@@ -43,9 +43,9 @@ _desktop_packages=(
     gnome-shell gdm3 gnome-shell-extensions gnome-shell-extension-manager
     gnome-tweaks gnome-themes-extra
     nautilus gnome-text-editor gnome-system-monitor file-roller
-    loupe evince gnome-calculator gnome-screenshot flameshot
-    bibata-cursor-theme papirus-icon-theme
-    fonts-inter-variable fonts-noto fonts-noto-color-emoji fonts-cantarell
+    loupe evince gnome-calculator flameshot
+    bibata-cursor-theme
+    fonts-inter-variable fonts-noto fonts-noto-color-emoji
     dconf-cli xdg-user-dirs
 )
 _missing_desktop=()

@@ -31,7 +31,7 @@ fi
 # ---------------------------------------------------------------------------
 # 3. apt-mark hold nodejs npm
 # ---------------------------------------------------------------------------
-for _held_pkg in nodejs npm ruby ruby-full; do
+for _held_pkg in nodejs npm ruby; do
     if ! guard::package_held "${_held_pkg}"; then
         dry_run_echo "would apt-mark hold ${_held_pkg}" || \
             apt-mark hold "${_held_pkg}" 2>/dev/null || \
@@ -91,7 +91,7 @@ smoke_00_base() {
             || { echo "smoke: package not installed: ${pkg}" >&2; return 1; }
     done
 
-    for _held in nodejs npm ruby ruby-full; do
+    for _held in nodejs npm ruby; do
         if dpkg-query -W "${_held}" &>/dev/null; then
             apt-mark showhold | grep -qxF "${_held}" \
                 || { echo "smoke: ${_held} is installed but not held" >&2; return 1; }
