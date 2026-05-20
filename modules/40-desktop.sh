@@ -47,6 +47,7 @@ _desktop_packages=(
     bibata-cursor-theme
     fonts-inter-variable fonts-noto fonts-noto-color-emoji
     dconf-cli xdg-user-dirs
+    firefox-esr
 )
 _missing_desktop=()
 for _pkg in "${_desktop_packages[@]}"; do

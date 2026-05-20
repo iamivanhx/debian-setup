@@ -47,6 +47,7 @@ _core_packages=(
     git build-essential make jq curl wget htop ripgrep fd-find bat tree unzip
     ca-certificates gnupg lsb-release
     fzf eza zoxide plocate btop fastfetch gh
+    neovim
 )
 _missing_packages=()
 for _pkg in "${_core_packages[@]}"; do
