@@ -71,7 +71,29 @@ if [[ "${#_missing_dev[@]}" -gt 0 ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 3. lazydocker — single static binary from upstream releases
+# 3. VS Code — official Microsoft .deb (its postinst registers the apt repo
+# at /etc/apt/sources.list.d/vscode.sources, so future updates come via apt)
+# ---------------------------------------------------------------------------
+if ! guard::package_installed code; then
+    dry_run_echo "would download VS Code .deb and install it" || {
+        _code_tmp="$(mktemp -d)"
+        _code_deb="${_code_tmp}/code.deb"
+        info "Downloading VS Code .deb…"
+        if curl -fsSL -o "${_code_deb}" "https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64"; then
+            DEBIAN_FRONTEND=noninteractive apt-get install -y \
+                -o Dpkg::Options::="--force-confdef" \
+                -o Dpkg::Options::="--force-confold" \
+                "${_code_deb}" \
+                || warn "VS Code install failed"
+        else
+            warn "VS Code .deb download failed"
+        fi
+        rm -rf "${_code_tmp}"
+    }
+fi
+
+# ---------------------------------------------------------------------------
+# 4. lazydocker — single static binary from upstream releases
 # ---------------------------------------------------------------------------
 LAZYDOCKER_VERSION="${LAZYDOCKER_VERSION:-0.25.2}"
 if ! guard::command_exists lazydocker; then
@@ -103,7 +125,7 @@ smoke_60_dev() {
         || { echo "smoke: mise keyring missing" >&2; return 1; }
 
     local pkg
-    for pkg in mise lazygit libssl-dev libreadline-dev libyaml-dev \
+    for pkg in mise lazygit code libssl-dev libreadline-dev libyaml-dev \
                libpq-dev libsqlite3-dev default-libmysqlclient-dev \
                postgresql-client redis-tools sqlite3; do
         guard::package_installed "${pkg}" \
@@ -116,6 +138,8 @@ smoke_60_dev() {
         || { echo "smoke: lazygit not on PATH" >&2; return 1; }
     guard::command_exists lazydocker \
         || { echo "smoke: lazydocker not on PATH" >&2; return 1; }
+    guard::command_exists code \
+        || { echo "smoke: code not on PATH" >&2; return 1; }
 
     # Apt-mark hold of ruby/ruby-full (set in 00-base) — assert here too since
     # 60-dev is the module that depends on mise winning over apt's ruby.
