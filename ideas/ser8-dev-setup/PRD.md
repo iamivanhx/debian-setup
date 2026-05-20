@@ -143,14 +143,22 @@ No central Traefik config edit. No router change. No client-side DNS edit. Visib
 
 ### 5.8 Test-staging platform
 
-- **Docker CE + Docker Compose plugin** from docker.com's apt repo.
-- **Traefik v3** running as a container under `/srv/data/lab/compose/traefik/docker-compose.yml`, using the **docker provider with a shared external network** (`traefik-proxy`). `exposedByDefault=false`. Entrypoints `web` (:80) and `websecure` (:443). Host-header routing only.
-- **No HTTPS in v1.** `websecure` exists as a placeholder so a later HTTPS story doesn't require re-architecting. Revisit when a project actually needs it.
-- **Avahi + avahi-aliases** from a vendored copy of the `avahi-aliases` community tool, reading a flat `/etc/avahi/aliases` file that lists one hostname per line (e.g. `whoami.local`, `projectb.local`). Runs as a systemd service that republishes on boot and reloads on config change.
-- **Directory convention:** `/srv/data/lab/compose/<project>/` contains each project's `docker-compose.yml`. Projects declare routing via Traefik labels and declare their alias via a convention documented in `docs/projects.md`.
-- **Reference whoami project** at `templates/lab/whoami/docker-compose.yml` as a copy-paste starter and as an end-to-end smoke test.
+**Revised 2026-05-20: v1 ships Docker engine only.** Traefik + Avahi + the whoami reference project move to a follow-up module (call it `75-traefik` when it lands). The motivation: scope-reduce the first lab pass to "containers run" before chaining a reverse-proxy + LAN discovery on top. The directory convention (`/srv/data/lab/compose/<project>/`) and the data-root layout from `20-storage` stay valid for the follow-up — only the routing layer is deferred.
+
+- **Docker CE + Docker Compose plugin** from docker.com's apt repo (deb822 source, key at `/etc/apt/keyrings/docker.asc`).
+- **User in `docker` group**, so `docker` / `docker compose` don't need `sudo` for day-to-day work.
+- **`docker.service` waits for `/srv/data` to mount** before starting (systemd drop-in shipped by `20-storage`), since the daemon's data-root lives on NVMe2.
+
+**Deferred (follow-up module):**
+- ~~Traefik v3~~ container under `/srv/data/lab/compose/traefik/`, docker provider, `traefik-proxy` external network, web/websecure entrypoints.
+- ~~Avahi + avahi-aliases~~ for `<project>.local` LAN discovery.
+- ~~Reference `whoami` project~~ as the end-to-end smoke test.
 
 ### 5.9 Backup
+
+**Deferred 2026-05-20.** The restic → B2 plan below is unchanged on paper, but no `80-backup.sh` module ships in v1. Reason: the SER8 isn't yet holding work that needs off-site protection (no live lab projects, dotfiles already in this repo). Revisit when the lab story is live and there's actually data to lose.
+
+**Backup plan (deferred — for reference when 80-backup eventually lands):**
 
 - **restic → Backblaze B2** (native B2 backend, no rclone shim).
 - **Include paths** (confirmed with user):
