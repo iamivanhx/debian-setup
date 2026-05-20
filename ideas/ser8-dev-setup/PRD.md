@@ -18,7 +18,7 @@ A single developer (the user).
 
 - Works daily in Node.js/TypeScript, Python, and Go.
 - Uses VS Code as primary editor.
-- Prefers sprawl-reducing modern tooling: pnpm over npm/nvm, uv over pip/pyenv/poetry.
+- Prefers sprawl-reducing modern tooling: **mise** for all language runtimes (Node/Python/Ruby/Go), one config, one PATH story. (Revised 2026-05-20 — previously pnpm + uv + apt golang-go; mise picked up Ruby support without adding a third tool.)
 - Cares about supply-chain hygiene (Socket.dev).
 - Owns a primary dev machine elsewhere; the SER8 is secondary.
 - Has working knowledge of Linux and bash. Has built Ansible projects before (specifically `macos-setup/`) and was unhappy with the result. Will push back on frameworks that obscure state.
@@ -105,14 +105,22 @@ No central Traefik config edit. No router change. No client-side DNS edit. Visib
 
 ### 5.5 Desktop
 
-- **KDE Plasma 6 minimal** package set. Explicit allow-list; no `kde-full`/`kde-standard`/`kde-plasma-desktop` meta-packages.
-  - v1 allow-list (finalized in plan): `plasma-desktop`, `sddm`, `konsole`, `dolphin`, `kate`, `ark`, `gwenview`, `okular`, `plasma-nm`, `plasma-pa`, `kscreen`, `kwalletmanager`, `xdg-desktop-portal-kde`, `breeze-gtk-theme`, `qt6-wayland`, `fonts-noto`, `fonts-noto-color-emoji`, `fonts-jetbrains-mono`.
-- **Stock Breeze Dark.** No theming layer (no Gruvbox, Yaru, Catppuccin).
-- **JetBrainsMono Nerd Font** installed from upstream tarball to `/usr/local/share/fonts/JetBrainsMonoNerdFont/` with an `fc-cache` follow-up.
-- **Terminal:** Konsole.
-- **Display manager:** SDDM.
-- **Wayland** is the default session.
-- **Flatpak + Flathub remote** enabled, but **no Flatpaks installed by default**. Plasma Discover surfaces both apt and Flatpak sources for future user-installed GUI apps.
+**Revised 2026-05-20: target is GNOME + Gruvbox, not KDE.** The earlier KDE Plasma + stock Breeze Dark line was a paper plan; the live SER8 has been running GNOME + Gruvbox since first boot, and `modules/40-desktop.sh` now codifies that. Anti-goals "No GNOME" and "No opinionated theming" in §6 are dropped accordingly.
+
+- **GNOME 48** on **Wayland**, from Debian apt. Explicit allow-list; no `gnome` / `gnome-core` / `task-gnome-desktop` meta-packages.
+  - v1 allow-list: `gnome-shell`, `gdm3`, `gnome-shell-extensions`, `gnome-shell-extension-manager`, `gnome-tweaks`, `gnome-themes-extra`, `nautilus`, `gnome-text-editor`, `gnome-system-monitor`, `file-roller`, `eog`, `evince`, `gnome-calculator`, `gnome-screenshot`, `bibata-cursor-theme`, `papirus-icon-theme`, `fonts-inter-variable`, `fonts-noto`, `fonts-noto-color-emoji`, `fonts-cantarell`, `dconf-cli`, `xdg-user-dirs`.
+- **Theming — Gruvbox.** All three of: **Gruvbox-Dark-Medium** GTK theme + libadwaita shim (from `Fausto-Korpsvart/Gruvbox-GTK-Theme` master, installed to `/usr/local/share/themes/`); **Gruvbox-Plus-Dark** icons (from `SylEleuth/gruvbox-plus-icon-pack` master, installed to `/usr/local/share/icons/`); **Bibata-Modern-Classic** cursor (apt).
+- **Accent colour:** `orange` (GNOME 47+ per-user accent — pairs with Gruvbox warm palette; blue would clash).
+- **Fonts:** **Inter Variable** for UI and titlebar, **JetBrainsMono Nerd Font Mono** for monospace. The Nerd Font is installed from upstream tarball to `/usr/local/share/fonts/JetBrainsMonoNerdFont/` with an `fc-cache` follow-up.
+- **GNOME Shell extensions:** `user-theme` (from `gnome-shell-extensions` apt package), `dash-to-dock@micxgx.gmail.com`, `space-bar@luchrioh`, `tactile@lundal.io` (zone snapping), `just-perfection-desktop@just-perfection` (UI polish), `appindicatorsupport@rgcjonas.gmail.com` (system tray for Signal/Slack-class apps). The EGO ones are fetched at install time from extensions.gnome.org (shell-version-aware) and unpacked into `~/.local/share/gnome-shell/extensions/<uuid>/`.
+- **Screenshot:** `flameshot` (apt) bound to `<Ctrl>Print` via a dconf custom-keybinding. The default `<Print>` still triggers `gnome-screenshot`.
+- **Wallpaper:** templated SVG at `/usr/local/share/backgrounds/gruvbox-dark.svg` using the Gruvbox palette; set as both light and dark `picture-uri`.
+- **Terminal:** **Ghostty**, installed from the trixie-tagged `.deb` published by `mkasberg/ghostty-ubuntu`. Configured to Gruvbox Dark Hard via templated `~/.config/ghostty/config`, JetBrainsMono Nerd Font Mono at 13pt, and registered as the Debian `x-terminal-emulator` alternative.
+- **Display manager:** GDM3 (Wayland session by default).
+- **Defaults distribution:** GNOME settings are written to a **system-wide dconf db** (`/etc/dconf/db/local.d/40-gruvbox`) compiled by `dconf update`. User-db overrides are respected; the system-db is the convergence target on a fresh install.
+- **Flatpak + Flathub remote** enabled, but **no Flatpaks installed by default**. (Behaviour unchanged from the previous PRD.)
+
+**Why not stock GNOME?** Cohesion. A blue-accent Adwaita Dark + Yaru cursor + Ubuntu Mono terminal renders as three half-finished aesthetic ideas in the same screenshot. Gruvbox is one decision that propagates to terminal, editor, dock indicator, and workspace bar in one stroke, with one palette to remember.
 
 ### 5.6 Shell
 
@@ -123,10 +131,14 @@ No central Traefik config edit. No router change. No client-side DNS edit. Visib
 
 ### 5.7 Dev environment
 
-- **Node.js:** pnpm, pnpm-managed Node versions (`pnpm env use --global lts`). No apt `nodejs`/`npm` (asserted absent, `apt-mark hold` as belt-and-suspenders).
-- **Python:** uv. No pip/pyenv/poetry at the host level.
-- **Go:** apt `golang-go` from `trixie-backports`.
-- **Editor:** VS Code via the Microsoft apt repo.
+**Revised 2026-05-20: mise replaces pnpm + uv + apt golang-go.** Trigger was needing Ruby on the box (Rails work). Rather than bolting on a third runtime manager, consolidating on `mise` for all four — Node, Python, Ruby, Go — keeps the per-project pinning story coherent. `mise` itself is installed from its own apt repo (`mise.jdx.dev/deb`), so ongoing updates come through `apt-get upgrade` like Docker.
+
+- **Runtime manager:** `mise` (apt repo, signed by `/etc/apt/keyrings/mise-archive-keyring.gpg`). Manages Node, Python, Ruby, Go versions per-project via `.mise.toml` / `.tool-versions`. Shell activation lives in `~/.zshrc` (handled by `50-shell`).
+- **Apt hold** on `nodejs npm ruby ruby-full` so apt's runtimes can never shadow mise's.
+- **Ruby/Rails build deps from apt** (used by mise's `ruby-build` and by common gem natives): `autoconf bison clang libssl-dev libreadline-dev zlib1g-dev libyaml-dev libncurses-dev libffi-dev libgdbm-dev libjemalloc2 libpq-dev libsqlite3-dev default-libmysqlclient-dev`. Plus DB clients: `postgresql-client redis-tools sqlite3`.
+- **Dev TUIs:** `lazygit` (apt), `lazydocker` (upstream tarball, pinned via `LAZYDOCKER_VERSION`), `gh` (apt, included in 00-base core).
+- **Editor:** VS Code via the Microsoft apt repo. (Unchanged.)
+- **No Rails install** at the host level — Rails is a project gem, installed by `bundle install` inside a project that has mise pinned to its Ruby version. The module's job ends at "you can run `mise install ruby@3` and it succeeds."
 - Supply-chain scanning (Socket.dev) is a user-level configuration, not a machine concern.
 
 ### 5.8 Test-staging platform
@@ -221,9 +233,9 @@ These are not in v1 and should not be reopened without an explicit PRD amendment
 - **No fail2ban.**
 - **No RAID (mdadm / RAID1).**
 - **No LVM.**
-- **No opinionated theming.** Stock Plasma Breeze Dark.
+- ~~**No opinionated theming.** Stock Plasma Breeze Dark.~~ **Dropped 2026-05-20.** See §5.5; Gruvbox is now the canonical theme.
 - **No oh-my-zsh, zinit, zplug, or any zsh framework.**
-- **No GNOME, XFCE, or Hyprland for this project.** The legacy scripts covering these are deleted.
+- **No XFCE or Hyprland for this project.** The legacy scripts covering these are deleted. (~~No GNOME~~ dropped 2026-05-20 — GNOME is now the chosen desktop; see §5.5.)
 - **No chezmoi or dotfile manager.** Dotfiles are bash-templated.
 - **No devcontainers / distrobox.** Host-level language runtimes.
 - **No fleet / multi-machine / host profiles.** One SER8, one config.
@@ -262,10 +274,10 @@ These are not in v1 and should not be reopened without an explicit PRD amendment
 ### Dev workstation
 
 9. As a developer, I want to boot to SDDM, log in, and land in a usable Plasma 6 session with Konsole, VS Code, and the full dev toolchain in PATH, so that the machine is immediately productive.
-10. As a developer, I want `node`, `pnpm`, `python`, `uv`, `go`, `git`, `code`, `docker` to all succeed on the first post-install shell, so that I don't have to chase PATH or install steps.
+10. As a developer, I want `mise`, `git`, `code`, `docker`, `lazygit`, `lazydocker`, `gh`, `fzf`, `eza`, `zoxide`, `btop`, `fastfetch` to all succeed on the first post-install shell, and `mise install` inside a project to bring up its pinned `node`/`python`/`ruby`/`go`, so that I don't have to chase PATH or per-runtime install steps.
 11. As a developer, I want zsh as my login shell with `starship` prompt and my templated `~/.zshrc`, so that my terminal feels familiar without any oh-my-zsh machinery.
 12. As a developer, I want `~/.cache/zsh/history` to persist across sessions, so that shell history isn't lost on crash.
-13. As a developer, I want accidental `apt install nodejs` to fail or be held, so that apt's Node can never shadow pnpm's Node.
+13. As a developer, I want accidental `apt install nodejs`/`ruby` to be held, so that apt's runtimes can never shadow mise's.
 
 ### Test-staging platform
 
@@ -305,7 +317,7 @@ These are not in v1 and should not be reopened without an explicit PRD amendment
 35. As a developer, if I'm running on a non-Trixie OS, I want the `00-base.sh` module to fail with the detected distro, so that I don't wreck the wrong machine.
 36. As a developer, if my ed25519 SSH key isn't in `ssh_authorized_keys`, I want the `30-security.sh` module to fail before touching sshd, so that I can't lock myself out.
 37. As a developer, if NVMe2 isn't detected by `20-storage.sh`, I want to fail with the correct device-path hint, so that I don't accidentally format the wrong disk.
-38. As a developer, if a subsequent `apt install` pulls `nodejs`/`npm` despite the hold, I want my next `./run.sh` to fail loudly, so that I can purge before it breaks my pnpm environment.
+38. As a developer, if a subsequent `apt install` pulls `nodejs`/`npm`/`ruby` despite the hold, I want my next `./run.sh` to fail loudly, so that I can purge before it breaks my mise environment.
 
 ### Admin / internal
 
@@ -346,7 +358,7 @@ These are not in v1 and should not be reopened without an explicit PRD amendment
 
 ### Daily productivity
 
-- **Given** a converged SER8, **when** the operator logs into Plasma, **then** zsh is the default shell, Konsole opens, `node --version` (via pnpm) succeeds, `uv --version` succeeds, `go version` succeeds, `code --version` succeeds.
+- **Given** a converged SER8, **when** the operator logs into GNOME, **then** zsh is the default shell, Ghostty opens, `mise --version` succeeds, `mise install` in a project with `.mise.toml` brings up the pinned node/python/ruby/go, `code --version` succeeds.
 
 ## 10. Implementation Decisions
 
@@ -362,7 +374,7 @@ The 9-module split is chosen for two reasons: it maps cleanly to the existing `b
 | `30-security.sh` | nftables, SSH, unattended-upgrades, sudo | Templated `/etc/nftables.conf`, templated `/etc/ssh/sshd_config`, `/etc/apt/apt.conf.d/50unattended-upgrades`, `/etc/sudoers.d/ser8` | `deploy_config` with diff-aware behavior |
 | `40-desktop.sh` | Plasma 6 minimal, SDDM, JetBrainsMono, Flatpak | Allow-listed Plasma packages, SDDM service enabled, Nerd Font tarball fetched, Flathub remote added | `guard::package_installed`, `guard::service_enabled`, `guard::dir_exists` on fonts |
 | `50-shell.sh` | zsh, starship, ~/.zshrc template | zsh install, `chsh`, apt plugins, starship install, templated dotfiles | `guard::user_shell_is`, `guard::command_exists` on starship |
-| `60-dev.sh` | pnpm, uv, Go, VS Code | pnpm install-and-`env use`, uv install, `golang-go`, `code` from MS apt | `guard::command_exists`, `guard::apt_repo_present` |
+| `60-dev.sh` | mise (apt repo), Ruby/Rails build deps, lazygit, lazydocker, VS Code | mise.jdx.dev apt repo + key, ruby-build native deps, lazygit (apt), lazydocker (upstream tarball), `code` from MS apt | `guard::command_exists`, `guard::apt_repo_present`, `guard::package_held` |
 | `70-lab.sh` | Docker CE, Compose, Traefik container, Avahi + aliases, reference whoami | docker.com apt repo, Docker CE, user added to `docker` group, `traefik-proxy` external network, Traefik compose up, avahi-daemon enabled, avahi-aliases systemd unit reading `/etc/avahi/aliases` | `guard::service_active`, `guard::docker_network_exists`, `guard::container_running` |
 | `80-backup.sh` | restic, B2 backend, systemd timers, retention | restic install, `restic init` on B2 (one-shot, guarded), templated `restic-backup.service`+`.timer`, `restic-forget.service`+`.timer` | `guard::file_exists` on restic repo marker, `guard::unit_enabled` |
 
@@ -534,7 +546,7 @@ The existing `beelink_debian_post_install.sh` has no tests — this is greenfiel
 - GRUB fallback to the previous kernel is verified once during the disaster drill.
 - Kernel upgrades are security-only excluded (not touched by unattended-upgrades); kernel upgrades happen manually so the operator is awake when they run.
 
-### R8 — Accidental `nodejs`/`npm` apt install shadowing pnpm
+### R8 — Accidental `nodejs`/`npm`/`ruby` apt install shadowing mise
 
 **Risk:** Any apt package pulling in `nodejs` transitively shadows pnpm-managed Node in PATH.
 

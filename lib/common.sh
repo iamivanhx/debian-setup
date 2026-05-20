@@ -96,3 +96,37 @@ deploy_template() {
             deploy_config "${dest}" < "${template}"
     fi
 }
+
+# Deploy a per-user template into ${SETUP_HOME}, owned by the target user.
+# The source path uses the literal placeholder "user":
+#   ${REPO_ROOT}/templates/home/user/<rel_path>
+# The destination is:
+#   ${SETUP_HOME}/<rel_path>
+# Parent dirs are created mode 0755 owned by the user; the destination file is
+# mode 0644 chown'd to the user. Backed up with a dated suffix if it exists
+# and differs.
+#   Example: deploy_user_template .config/ghostty/config "ghostty terminal config"
+deploy_user_template() {
+    local rel="${1:-}"
+    [[ -n "${rel}" ]] || error "deploy_user_template: relative path must not be empty"
+    local desc="${2:-${rel}}"
+    [[ -n "${SETUP_HOME:-}" ]] || error "deploy_user_template: SETUP_HOME is unset"
+    local template="${REPO_ROOT}/templates/home/user/${rel}"
+    local dest="${SETUP_HOME}/${rel}"
+    [[ -f "${template}" ]] || error "deploy_user_template: template not found: ${template}"
+    if guard::file_matches_template "${dest}" "${template}"; then
+        return 0
+    fi
+    dry_run_echo "would deploy ${dest} (${desc})" && return 0
+    local owner_user owner_group
+    owner_user="$(stat -c '%U' "${SETUP_HOME}")"
+    owner_group="$(stat -c '%G' "${SETUP_HOME}")"
+    install -d -o "${owner_user}" -g "${owner_group}" -m 0755 "$(dirname "${dest}")"
+    if [[ -f "${dest}" ]]; then
+        local backup
+        backup="${dest}.bak.$(date +%Y%m%d_%H%M%S_%N)"
+        cp -a "${dest}" "${backup}"
+        info "Backed up ${dest} → ${backup}"
+    fi
+    install -m 0644 -o "${owner_user}" -g "${owner_group}" "${template}" "${dest}"
+}

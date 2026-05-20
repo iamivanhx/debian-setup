@@ -1,0 +1,28 @@
+# 40-desktop: GDM greeter styling.
+# Compiled into /etc/dconf/db/gdm by `dconf update`. The gdm system user reads
+# this profile at greeter time, picking up theme/icon/cursor + Inter font.
+# Background image is not set here — GDM's greeter draws its own solid backdrop
+# via gnome-shell, which would require a gresource patch to override and that
+# patch breaks on every gnome-shell apt upgrade. Leaving it to GDM's default.
+
+[org/gnome/desktop/interface]
+gtk-theme='Gruvbox-Dark-Medium'
+icon-theme='Gruvbox-Plus-Dark'
+cursor-theme='Bibata-Modern-Classic'
+cursor-size=24
+font-name='Inter Variable 11'
+monospace-font-name='JetBrainsMono Nerd Font Mono 12'
+color-scheme='prefer-dark'
+
+[org/gnome/login-screen]
+disable-user-list=false
+banner-message-enable=false
+logo=''
+allowed-failures=3
+
+[org/gnome/desktop/peripherals/touchpad]
+tap-to-click=true
+natural-scroll=true
+
+[org/gnome/desktop/sound]
+event-sounds=false

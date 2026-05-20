@@ -31,7 +31,7 @@ fi
 # ---------------------------------------------------------------------------
 # 3. apt-mark hold nodejs npm
 # ---------------------------------------------------------------------------
-for _held_pkg in nodejs npm; do
+for _held_pkg in nodejs npm ruby ruby-full; do
     if ! guard::package_held "${_held_pkg}"; then
         dry_run_echo "would apt-mark hold ${_held_pkg}" || \
             apt-mark hold "${_held_pkg}" 2>/dev/null || \
@@ -46,6 +46,7 @@ done
 _core_packages=(
     git build-essential make jq curl wget htop ripgrep fd-find bat tree unzip
     ca-certificates gnupg lsb-release
+    fzf eza zoxide plocate btop fastfetch gh
 )
 _missing_packages=()
 for _pkg in "${_core_packages[@]}"; do
@@ -90,7 +91,7 @@ smoke_00_base() {
             || { echo "smoke: package not installed: ${pkg}" >&2; return 1; }
     done
 
-    for _held in nodejs npm; do
+    for _held in nodejs npm ruby ruby-full; do
         if dpkg-query -W "${_held}" &>/dev/null; then
             apt-mark showhold | grep -qxF "${_held}" \
                 || { echo "smoke: ${_held} is installed but not held" >&2; return 1; }
