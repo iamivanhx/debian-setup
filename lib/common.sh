@@ -97,6 +97,26 @@ deploy_template() {
     fi
 }
 
+# Deploy a template, expanding a whitelist of ${VAR} references via envsubst.
+# Use this when a templated file needs runtime values (LAN_SUBNET, etc).
+# The whitelist keeps envsubst from touching shell-syntax $vars that aren't
+# meant to be expanded (sshd_config doesn't need this; nftables does).
+#   Example: deploy_template_subst /etc/nftables.conf "nftables ruleset" '${LAN_SUBNET}'
+deploy_template_subst() {
+    local dest="${1:-}" desc="${2:-${1}}" varlist="${3:-}"
+    [[ -n "${dest}"    ]] || error "deploy_template_subst: dest required"
+    [[ -n "${varlist}" ]] || error "deploy_template_subst: varlist required (e.g. '\${LAN_SUBNET}')"
+    local template="${REPO_ROOT}/templates${dest}"
+    [[ -f "${template}" ]] || error "deploy_template_subst: template not found: ${template}"
+    local rendered
+    rendered="$(envsubst "${varlist}" < "${template}")"
+    if [[ -f "${dest}" ]] && diff -q <(printf '%s' "${rendered}") "${dest}" >/dev/null 2>&1; then
+        return 0
+    fi
+    dry_run_echo "would deploy ${dest} (${desc}, envsubst:${varlist})" && return 0
+    printf '%s' "${rendered}" | deploy_config "${dest}"
+}
+
 # Deploy a per-user template into ${SETUP_HOME}, owned by the target user.
 # The source path uses the literal placeholder "user":
 #   ${REPO_ROOT}/templates/home/user/<rel_path>

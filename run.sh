@@ -38,6 +38,9 @@ export POWER_PROFILE
 NVME2_DEVICE="${NVME2_DEVICE:-/dev/nvme1n1}"
 export NVME2_DEVICE
 
+LAN_SUBNET="${LAN_SUBNET:-192.168.1.0/24}"
+export LAN_SUBNET
+
 DRY_RUN=0
 if [[ "${1:-}" == "--dry-run" ]]; then
     DRY_RUN=1
