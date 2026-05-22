@@ -34,7 +34,9 @@ GRUVBOX_GTK_REF="${GRUVBOX_GTK_REF:-578cd220b5ff6e86b078a6111d26bb20ec8c733f}"
 GRUVBOX_ICONS_REPO="${GRUVBOX_ICONS_REPO:-SylEleuth/gruvbox-plus-icon-pack}"
 # Pinned to the latest tagged release (2026-04-17).
 GRUVBOX_ICONS_REF="${GRUVBOX_ICONS_REF:-v6.4.0}"
-JETBRAINS_FONT_URL="${JETBRAINS_FONT_URL:-https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.zip}"
+# Pinned to the latest tagged release (2025-04-24).
+NERD_FONT_VERSION="${NERD_FONT_VERSION:-3.4.0}"
+JETBRAINS_FONT_URL="${JETBRAINS_FONT_URL:-https://github.com/ryanoasis/nerd-fonts/releases/download/v${NERD_FONT_VERSION}/JetBrainsMono.zip}"
 
 # ---------------------------------------------------------------------------
 # 1. GNOME core packages + themeable companions
