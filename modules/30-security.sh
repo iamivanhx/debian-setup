@@ -124,7 +124,11 @@ fi
 # ---------------------------------------------------------------------------
 # 6. Lock root account (PRD §5.10 — "No root password")
 # ---------------------------------------------------------------------------
-_root_pw_status="$(passwd -S root 2>/dev/null | awk '{print $2}')"
+# `passwd -S` needs CAP_DAC_READ_SEARCH on /etc/shadow → root-only. Under
+# `set -e + pipefail` an unprivileged invocation (lint, dry-run on a dev box)
+# would abort the whole script here. `|| true` lets the pipe fail soft; the
+# empty status string then falls through the conditional cleanly.
+_root_pw_status="$(passwd -S root 2>/dev/null | awk '{print $2}' || true)"
 if [[ "${_root_pw_status}" == "P" ]]; then
     dry_run_echo "would passwd -l root (currently has a password)" || \
         passwd -l root
@@ -221,9 +225,11 @@ smoke_30_security() {
     guard::service_enabled unattended-upgrades \
         || { echo "smoke: unattended-upgrades.service not enabled" >&2; return 1; }
 
-    # Root must not have a usable password
+    # Root must not have a usable password. Same || true guard as section 6 —
+    # smoke is normally invoked as root, but a non-root spot-check shouldn't
+    # crash the harness.
     local _rs
-    _rs="$(passwd -S root 2>/dev/null | awk '{print $2}')"
+    _rs="$(passwd -S root 2>/dev/null | awk '{print $2}' || true)"
     [[ "${_rs}" == "L" || "${_rs}" == "LK" || "${_rs}" == "NP" ]] \
         || { echo "smoke: root password status is '${_rs}' — expected L / LK / NP" >&2; return 1; }
 
