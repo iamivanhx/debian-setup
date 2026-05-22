@@ -1,0 +1,39 @@
+[Unit]
+Description=Avahi CNAME alias publisher
+Documentation=https://github.com/airtonix/avahi-aliases
+Requires=avahi-daemon.service
+After=avahi-daemon.service
+PartOf=avahi-daemon.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/avahi-aliases /etc/avahi/aliases
+Restart=always
+RestartSec=2
+
+# Sandboxing. The publisher reads /etc/avahi/aliases (root-owned text file)
+# and speaks to the Avahi D-Bus on the system bus — nothing else. Keeping
+# User=root because the default Debian Avahi D-Bus policy requires root for
+# EntryGroupNew/AddRecord/Commit; dropping privileges further would require
+# a custom dbus policy drop-in that's out of scope here.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectClock=true
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadOnlyPaths=/etc/avahi
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
