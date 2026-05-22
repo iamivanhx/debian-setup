@@ -1,11 +1,15 @@
 [Unit]
 Description=Restart avahi-aliases when /etc/avahi/aliases changes
 After=avahi-aliases.service
+# Throttle bursts so an editor's modify-rename cycle (vim's :w writes the file
+# under a tempname, renames over the target, then touches the directory)
+# doesn't fire the restart unit more than 10× per 5s window.
+TriggerLimitIntervalSec=5
+TriggerLimitBurst=10
 
 [Path]
 PathChanged=/etc/avahi/aliases
 Unit=avahi-aliases-restart.service
-TriggerLimitIntervalSec=5
 
 [Install]
 WantedBy=multi-user.target

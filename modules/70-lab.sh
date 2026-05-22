@@ -97,8 +97,13 @@ fi
 # 5. Verify daemon.json data-root from 20-storage is actually in effect.
 # Catches the case where 20-storage didn't land the drop-in but docker is
 # already running on /var/lib/docker — would silently fill the system disk.
+# Also catches the case where docker.service failed to start at all — the
+# rest of this module (avahi alias for whoami.local, traefik-proxy network,
+# compose stacks) would otherwise half-converge against a dead daemon.
 # ---------------------------------------------------------------------------
-if [[ "${DRY_RUN:-0}" != "1" ]] && guard::service_active docker; then
+if [[ "${DRY_RUN:-0}" != "1" ]]; then
+    guard::service_active docker \
+        || error "70-lab: docker.service is not active after enable+start — refusing to proceed. Check 'journalctl -u docker.service' and 20-storage's daemon.json drop-in."
     _docker_root="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null)"
     if [[ "${_docker_root}" != "/srv/data/docker" ]]; then
         error "70-lab: docker info reports DockerRootDir='${_docker_root:-<empty>}' (want /srv/data/docker) — 20-storage daemon.json drop-in did not land. Investigate before proceeding."
