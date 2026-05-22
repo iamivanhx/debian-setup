@@ -6,11 +6,15 @@
 # Apt's nodejs/npm/ruby/ruby-full are `apt-mark hold`ed in 00-base so they
 # can't shadow mise's installs.
 #
-# After install, the user runs:
-#   mise use --global node@lts python@3 ruby@3 go@1
-#   mise install
-# in any project to get the right runtime in PATH.  mise activate in zsh is
-# handled by the 50-shell module's .zshrc template.
+# Node@lts is bootstrapped here (rather than left to the user) so that
+# `sfw` (Socket Firewall) can be installed globally via npm.  sfw wraps
+# pnpm/npm to block known-malicious packages; the .zshrc pnpm function
+# wrapper picks it up automatically.
+#
+# After install, the user can extend the global runtimes with:
+#   mise use --global python@3 ruby@3 go@1 && mise install
+# in any project to add the rest.  mise activate in zsh is handled by
+# the 50-shell module's .zshrc template.
 
 step "60-dev"
 
@@ -111,6 +115,27 @@ if ! guard::command_exists lazydocker; then
     }
 fi
 
+# ---------------------------------------------------------------------------
+# 5. Socket Firewall (sfw) — host-global supply-chain wrapper for pnpm/npm
+#
+# Bootstraps node@lts via mise as the primary user, then `npm install -g sfw`
+# so the shim lands at ~/.local/share/mise/shims/sfw.  The pnpm function in
+# the .zshrc template wraps `pnpm` through sfw when present.
+# ---------------------------------------------------------------------------
+_sfw_shim="${SETUP_HOME}/.local/share/mise/shims/sfw"
+if ! run_as_user test -x "${_sfw_shim}"; then
+    dry_run_echo "would bootstrap mise node@lts + npm install -g sfw (as ${SUDO_USER:-${USER:-}})" || {
+        run_as_user mise use --global node@lts \
+            || warn "mise use --global node@lts failed"
+        run_as_user mise install node@lts \
+            || warn "mise install node@lts failed"
+        run_as_user mise exec node@lts -- npm install -g sfw \
+            || warn "npm install -g sfw failed"
+        run_as_user mise reshim
+        [[ -x "${_sfw_shim}" ]] && success "sfw shimmed at ${_sfw_shim}"
+    }
+fi
+
 smoke_60_dev() {
     [[ "${DRY_RUN:-0}" == "1" ]] && return 0
 
@@ -141,13 +166,17 @@ smoke_60_dev() {
     guard::command_exists code \
         || { echo "smoke: code not on PATH" >&2; return 1; }
 
+    # sfw (Socket Firewall) — installed under the user's mise-managed node.
+    local _shims_dir="${SETUP_HOME}/.local/share/mise/shims"
+    [[ -x "${_shims_dir}/node" ]] \
+        || { echo "smoke: node shim missing at ${_shims_dir}/node" >&2; return 1; }
+    [[ -x "${_shims_dir}/sfw" ]] \
+        || { echo "smoke: sfw shim missing at ${_shims_dir}/sfw" >&2; return 1; }
+
     # Apt-mark hold of ruby (set in 00-base) — assert here too since
     # 60-dev is the module that depends on mise winning over apt's ruby.
-    local h
-    for h in ruby; do
-        if dpkg-query -W "${h}" &>/dev/null; then
-            apt-mark showhold | grep -qxF "${h}" \
-                || { echo "smoke: ${h} is installed but not held" >&2; return 1; }
-        fi
-    done
+    if dpkg-query -W ruby &>/dev/null; then
+        apt-mark showhold | grep -qxF ruby \
+            || { echo "smoke: ruby is installed but not held" >&2; return 1; }
+    fi
 }
