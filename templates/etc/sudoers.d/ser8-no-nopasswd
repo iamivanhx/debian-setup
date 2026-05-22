@@ -1,0 +1,7 @@
+# Managed by ser8-setup (modules/30-security.sh). PRD §5.10 — sudo must always
+# prompt for a password. No NOPASSWD entries permitted.
+#
+# passwd_timeout=0 means the password prompt waits forever instead of timing
+# out, so an unattended sudo call blocks rather than silently aborting.
+
+Defaults passwd_timeout=0

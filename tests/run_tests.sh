@@ -48,6 +48,7 @@ write_secrets() {
     cat > "${sandbox}/home/.config/ser8-setup/secrets.env" <<'EOF'
 # stub secrets for tests
 NVME2_LUKS_PASSPHRASE="test-passphrase-not-for-production"
+SSH_AUTHORIZED_KEYS="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITESTKEYTESTKEYTESTKEYTESTKEYTESTKEY00 stub@ser8-tests"
 EOF
 }
 
