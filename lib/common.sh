@@ -59,13 +59,17 @@ safe_install() {
 }
 
 # Run a command as the primary non-root user (SUDO_USER if set, else USER).
+# `sudo -H` rewrites HOME to the target user's home; default Debian sudoers
+# does not set `always_set_home`, so without `-H` HOME would stay at the
+# caller's value (e.g. /root) and tools that key off HOME (mise, npm, glib,
+# zsh dotfile sourcing) would write to the wrong directory.
 #   Example: run_as_user git clone https://github.com/example/repo
 run_as_user() {
     local target_user="${SUDO_USER:-${USER:-}}"
     if [[ -z "${target_user}" || "${target_user}" == "root" ]]; then
         error "run_as_user: cannot resolve a non-root target user (SUDO_USER='${SUDO_USER:-}', USER='${USER:-}')"
     fi
-    sudo -n -u "${target_user}" -- "$@"
+    sudo -H -n -u "${target_user}" -- "$@"
 }
 
 # Echo a dry-run notice and return 0 when DRY_RUN=1; otherwise return 1.

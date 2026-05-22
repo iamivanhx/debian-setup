@@ -118,21 +118,23 @@ fi
 # ---------------------------------------------------------------------------
 # 5. Socket Firewall (sfw) — host-global supply-chain wrapper for pnpm/npm
 #
-# Bootstraps node@lts via mise as the primary user, then `npm install -g sfw`
-# so the shim lands at ~/.local/share/mise/shims/sfw.  The pnpm function in
-# the .zshrc template wraps `pnpm` through sfw when present.
+# Bootstraps node@lts via mise as the primary user, then `npm install -g
+# sfw@${SFW_VERSION}` so the shim lands at ~/.local/share/mise/shims/sfw.
+# The pnpm function in the .zshrc template wraps `pnpm` through sfw when
+# present.  Pinned because supply-chain wrappers shouldn't float silently.
 # ---------------------------------------------------------------------------
+SFW_VERSION="${SFW_VERSION:-2.0.4}"
 _sfw_shim="${SETUP_HOME}/.local/share/mise/shims/sfw"
 if ! run_as_user test -x "${_sfw_shim}"; then
-    dry_run_echo "would bootstrap mise node@lts + npm install -g sfw (as ${SUDO_USER:-${USER:-}})" || {
+    dry_run_echo "would bootstrap mise node@lts + npm install -g sfw@${SFW_VERSION} (as ${SUDO_USER:-${USER:-}})" || {
         run_as_user mise use --global node@lts \
             || warn "mise use --global node@lts failed"
         run_as_user mise install node@lts \
             || warn "mise install node@lts failed"
-        run_as_user mise exec node@lts -- npm install -g sfw \
-            || warn "npm install -g sfw failed"
+        run_as_user mise exec node@lts -- npm install -g "sfw@${SFW_VERSION}" \
+            || warn "npm install -g sfw@${SFW_VERSION} failed"
         run_as_user mise reshim
-        [[ -x "${_sfw_shim}" ]] && success "sfw shimmed at ${_sfw_shim}"
+        [[ -x "${_sfw_shim}" ]] && success "sfw@${SFW_VERSION} shimmed at ${_sfw_shim}"
     }
 fi
 
