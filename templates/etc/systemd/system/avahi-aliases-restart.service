@@ -1,0 +1,7 @@
+[Unit]
+Description=Restart avahi-aliases.service (triggered by avahi-aliases.path)
+After=avahi-aliases.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/systemctl try-restart avahi-aliases.service

@@ -1,0 +1,11 @@
+[Unit]
+Description=Restart avahi-aliases when /etc/avahi/aliases changes
+After=avahi-aliases.service
+
+[Path]
+PathChanged=/etc/avahi/aliases
+Unit=avahi-aliases-restart.service
+TriggerLimitIntervalSec=5
+
+[Install]
+WantedBy=multi-user.target

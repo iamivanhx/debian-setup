@@ -1,0 +1,30 @@
+# Traefik v3 — Docker provider only, no static config file.
+# Per PRD §10.6: static config lives in command-line args; dynamic config
+# (routes, services, middlewares) comes from Docker labels on the other
+# containers attached to the traefik-proxy network.
+#
+# No HTTPS in v1. The websecure entrypoint is declared so future TLS work
+# (mkcert, internal CA) can drop in without recreating the container.
+
+services:
+  traefik:
+    image: traefik:v3.5
+    container_name: traefik
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedByDefault=false
+      - --providers.docker.network=traefik-proxy
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - traefik-proxy
+
+networks:
+  traefik-proxy:
+    external: true

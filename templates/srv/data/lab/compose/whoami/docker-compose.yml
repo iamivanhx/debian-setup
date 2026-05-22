@@ -1,0 +1,21 @@
+# whoami — reference project for the Traefik + Avahi loop.
+# Routed at http://whoami.local on the LAN via the avahi-aliases CNAME
+# (whoami.local → <ser8-hostname>.local) + Traefik Host(`whoami.local`) rule.
+
+services:
+  whoami:
+    image: traefik/whoami:v1.11
+    container_name: whoami
+    restart: unless-stopped
+    networks:
+      - traefik-proxy
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik-proxy
+      - traefik.http.routers.whoami.rule=Host(`whoami.local`)
+      - traefik.http.routers.whoami.entrypoints=web
+      - traefik.http.services.whoami.loadbalancer.server.port=80
+
+networks:
+  traefik-proxy:
+    external: true

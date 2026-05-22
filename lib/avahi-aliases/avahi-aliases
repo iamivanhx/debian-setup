@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+#
+# avahi-aliases — publish CNAME aliases via the local Avahi daemon.
+#
+# Reads names (one per line, optional "#" comments and blank lines) from
+# the path supplied as argv[1] (default: /etc/avahi/aliases) and adds them
+# as CNAMEs pointing to the host's mDNS FQDN. The script then idles; on
+# SIGTERM it cleanly resets the Avahi entry group.
+#
+# Origin: ported from airtonix/avahi-aliases (MIT, 2025, Zeno Jiricek)
+# to Python 3 + python3-dbus. The original used the python2-only `avahi`
+# package, which is not available on Debian 13. See VENDORED.md.
+
+import argparse
+import logging
+import os
+import signal
+import sys
+
+import dbus
+from dbus.mainloop.glib import DBusGMainLoop
+from gi.repository import GLib
+
+DBUS_NAME = "org.freedesktop.Avahi"
+DBUS_INTERFACE_SERVER = DBUS_NAME + ".Server"
+DBUS_INTERFACE_ENTRY_GROUP = DBUS_NAME + ".EntryGroup"
+DBUS_PATH_SERVER = "/"
+
+IF_UNSPEC = -1
+PROTO_UNSPEC = -1
+CLASS_IN = 0x01
+TYPE_CNAME = 0x05
+TTL = 60
+
+logger = logging.getLogger("avahi-aliases")
+
+
+def read_aliases(path):
+    aliases = []
+    with open(path, "r", encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            aliases.append(line)
+    return aliases
+
+
+def encode_name(name):
+    return ".".join(
+        part.encode("idna").decode("ascii") for part in name.split(".") if part
+    )
+
+
+def encode_rdata(name):
+    out = b""
+    for part in name.split("."):
+        if not part:
+            continue
+        ascii_part = part.encode("idna")
+        out += bytes([len(ascii_part)]) + ascii_part
+    out += b"\0"
+    return out
+
+
+def publish(server, group, cname):
+    fqdn = server.GetHostNameFqdn()
+    rdata = encode_rdata(fqdn)
+    group.AddRecord(
+        IF_UNSPEC,
+        PROTO_UNSPEC,
+        dbus.UInt32(0),
+        encode_name(cname),
+        CLASS_IN,
+        TYPE_CNAME,
+        TTL,
+        dbus.Array(rdata, signature="y"),
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Publish Avahi CNAME aliases")
+    parser.add_argument(
+        "aliases_file",
+        nargs="?",
+        default="/etc/avahi/aliases",
+        help="path to aliases file (one CNAME per line)",
+    )
+    parser.add_argument("--debug", action="store_true")
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.debug else logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+    )
+
+    if not os.path.exists(args.aliases_file):
+        logger.error("aliases file not found: %s", args.aliases_file)
+        return 1
+
+    aliases = read_aliases(args.aliases_file)
+    if not aliases:
+        logger.info("no aliases declared — idling")
+
+    DBusGMainLoop(set_as_default=True)
+    bus = dbus.SystemBus()
+    server = dbus.Interface(
+        bus.get_object(DBUS_NAME, DBUS_PATH_SERVER),
+        DBUS_INTERFACE_SERVER,
+    )
+    group_path = server.EntryGroupNew()
+    group = dbus.Interface(
+        bus.get_object(DBUS_NAME, group_path),
+        DBUS_INTERFACE_ENTRY_GROUP,
+    )
+
+    loop = GLib.MainLoop()
+
+    def _terminate(*_):
+        logger.info("stopping")
+        try:
+            group.Reset()
+        except dbus.exceptions.DBusException:
+            pass
+        loop.quit()
+        return GLib.SOURCE_REMOVE
+
+    # GLib.unix_signal_add integrates the signal with the main loop so the
+    # handler runs immediately on SIGTERM — signal.signal() alone is only
+    # delivered between Python bytecode ops and would stall up to systemd's
+    # TimeoutStopSec while the GLib loop spins in C.
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, _terminate)
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, _terminate)
+
+    published = 0
+    for cname in aliases:
+        try:
+            publish(server, group, cname)
+            logger.info("announcing %s", cname)
+            published += 1
+        except (dbus.exceptions.DBusException, UnicodeError, ValueError) as exc:
+            # One bad alias must not crash-loop the whole publisher; log + skip.
+            # UnicodeError covers IDNA encode failures (non-LDH chars, labels >63 octets);
+            # ValueError covers the bytes([len(...)]) overflow if a label is >255 octets.
+            logger.warning("skipping bad alias %r: %s", cname, exc)
+    if published:
+        group.Commit()
+        logger.info("announced %d alias(es)", published)
+
+    loop.run()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main() or 0)
