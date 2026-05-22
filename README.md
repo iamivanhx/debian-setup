@@ -63,7 +63,7 @@ ln -sf ../../scripts/pre-commit.sh .git/hooks/pre-commit
 
 - [x] Phase 0: Pre-flight — repo scaffold, install cheat sheet, legacy cleanup
 - [x] Phase 1: Foundation — base + hardware + storage + security
-- [ ] Phase 2: Workstation — desktop + shell + dev *(modules landed; legacy `beelink_debian_post_install.sh` delete pending #14)*
+- [x] Phase 2: Workstation — desktop + shell + dev *(v1 source of truth consolidated; see [docs/porting-audit.md](docs/porting-audit.md))*
 - [ ] Phase 3: Lab + Backup + Disaster Drill *(Docker engine in #15; Traefik+Avahi, restic #16, docs #17, drill #18 outstanding)*
 - [ ] Phase 4: Resilience — monitoring, auto-updates, drift detection *(auto-updates done in 30-security; rest outstanding)*
 - [ ] Phase 5: Acceptance — full walk of docs/acceptance.md on real hardware
