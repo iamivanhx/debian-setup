@@ -13,6 +13,9 @@
 
 step "50-shell"
 
+# Pinned to the latest tagged release (2026-04-30). Bump deliberately.
+STARSHIP_VERSION="${STARSHIP_VERSION:-v1.25.1}"
+
 # ---------------------------------------------------------------------------
 # 0. Resolve target user + paths
 # ---------------------------------------------------------------------------
@@ -40,9 +43,10 @@ fi
 # 2. Starship (official install script — PRD §5.6 mandates this path)
 # ---------------------------------------------------------------------------
 if ! guard::command_exists starship; then
-    dry_run_echo "would install starship from starship.rs/install.sh" || {
-        if curl -fsSL https://starship.rs/install.sh | sh -s -- -y; then
-            success "starship installed at $(command -v starship)"
+    dry_run_echo "would install starship ${STARSHIP_VERSION} from starship.rs/install.sh" || {
+        if curl -fsSL https://starship.rs/install.sh \
+                | sh -s -- -y -b /usr/local/bin -v "${STARSHIP_VERSION}"; then
+            success "starship ${STARSHIP_VERSION} installed at $(command -v starship)"
         else
             warn "starship install script failed — check network / starship.rs"
         fi
@@ -100,4 +104,22 @@ smoke_50_shell() {
 
     [[ -d "${_user_home}/.cache/zsh" ]] \
         || { echo "smoke: ~/.cache/zsh missing" >&2; return 1; }
+
+    # mise shims must precede /usr/bin in PATH. A stray apt install of nodejs,
+    # ruby, etc. would otherwise shadow the mise-managed runtime even though
+    # 00-base apt-mark holds the obvious offenders.
+    local _zsh_path _mise_pos _usrbin_pos _mise_line
+    _mise_line="${_user_home}/.local/share/mise/shims"
+    # shellcheck disable=SC2016  # $PATH must be expanded by zsh, not by us.
+    _zsh_path="$(run_as_user zsh -ic 'echo $PATH')"
+    [[ -n "${_zsh_path}" ]] \
+        || { echo "smoke: zsh -ic produced no PATH" >&2; return 1; }
+    _mise_pos="$(echo "${_zsh_path}" | tr : '\n' | grep -nxF "${_mise_line}" | head -1 | cut -d: -f1)"
+    _usrbin_pos="$(echo "${_zsh_path}" | tr : '\n' | grep -nxF '/usr/bin' | head -1 | cut -d: -f1)"
+    [[ -n "${_mise_pos}" ]] \
+        || { echo "smoke: mise shims (${_mise_line}) not in zsh PATH" >&2; return 1; }
+    [[ -n "${_usrbin_pos}" ]] \
+        || { echo "smoke: /usr/bin not in zsh PATH" >&2; return 1; }
+    [[ "${_mise_pos}" -lt "${_usrbin_pos}" ]] \
+        || { echo "smoke: mise shims must precede /usr/bin in zsh PATH" >&2; return 1; }
 }
