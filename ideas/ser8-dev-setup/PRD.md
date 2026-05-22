@@ -139,7 +139,7 @@ No central Traefik config edit. No router change. No client-side DNS edit. Visib
 - **Dev TUIs:** `lazygit` (apt), `lazydocker` (upstream tarball, pinned via `LAZYDOCKER_VERSION`), `gh` (apt, included in 00-base core).
 - **Editor:** VS Code via the Microsoft apt repo. (Unchanged.)
 - **No Rails install** at the host level — Rails is a project gem, installed by `bundle install` inside a project that has mise pinned to its Ruby version. The module's job ends at "you can run `mise install ruby@3` and it succeeds."
-- Supply-chain scanning (Socket.dev) is a user-level configuration, not a machine concern.
+- **Supply-chain scanning (Socket Firewall, `sfw`)** is installed host-globally by `60-dev`: `node@lts` is bootstrapped via `mise` for the primary user, then `npm install -g sfw` lands the binary at `~/.local/share/mise/shims/sfw`. The 50-shell `.zshrc` template defines a `pnpm()` function wrapping `sfw pnpm "$@"` so every `pnpm install` is screened by default. (Revised 2026-05-22 — previously documented as user-level.)
 
 ### 5.8 Test-staging platform
 

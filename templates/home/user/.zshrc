@@ -67,6 +67,14 @@ export FZF_ALT_C_COMMAND='fdfind --type=d --hidden --follow --exclude .git'
 # --- mise (Node / Python / Ruby / Go) ---
 command -v mise >/dev/null 2>&1 && eval "$(mise activate zsh)"
 
+# --- Socket Firewall (sfw) — wrap pnpm to block malicious packages ---
+# Installed globally under mise-managed node by 60-dev.  A function (not
+# an alias) so it survives subshells.  Use `command pnpm …` as an escape
+# hatch when you need to bypass sfw (e.g. local debugging).
+if command -v sfw >/dev/null 2>&1; then
+    pnpm() { sfw pnpm "$@"; }
+fi
+
 # --- zoxide (smart cd) ---
 command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init --cmd cd zsh)"
 
