@@ -58,6 +58,11 @@ deploy_config() {
 }
 
 # Install packages with a dry-run preflight check.
+#
+# On install failure, refresh the apt index and retry once.  Catches the common
+# case where the cached Packages index points at a .deb version the mirror has
+# already rotated away (e.g. libc6-i386 2.41-12+deb13u2 → 404 after a point
+# release), without needing a full second run.sh.
 #   Example: safe_install "curl and wget" curl wget
 safe_install() {
     local desc="$1"
@@ -66,10 +71,16 @@ safe_install() {
     if ! apt-get install -y --dry-run "$@" &>/dev/null; then
         warn "Preflight check flagged issues for: ${desc}. Attempting install anyway..."
     fi
-    DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" \
-        -o Dpkg::Options::="--force-confdef" \
-        -o Dpkg::Options::="--force-confold" \
-        || warn "Some packages in '${desc}' could not be installed — continuing."
+    if ! DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" \
+            -o Dpkg::Options::="--force-confdef" \
+            -o Dpkg::Options::="--force-confold"; then
+        warn "Install of '${desc}' failed — refreshing apt index and retrying once..."
+        apt-get update -qq || true
+        DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" \
+            -o Dpkg::Options::="--force-confdef" \
+            -o Dpkg::Options::="--force-confold" \
+            || { warn "Some packages in '${desc}' could not be installed — continuing."; return; }
+    fi
     success "${desc} installed."
 }
 

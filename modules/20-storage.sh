@@ -152,6 +152,24 @@ if [[ "${_dropin_changed}" -eq 1 ]]; then
         { systemctl daemon-reload || warn "systemctl daemon-reload failed"; }
 fi
 
+# ---------------------------------------------------------------------------
+# 13. Restart dockerd if it's running with a stale DockerRootDir.
+# Happens when the docker package postinst started dockerd on the default
+# /var/lib/docker BEFORE this module landed daemon.json on a prior interrupted
+# run.  daemon-reload above re-reads systemd units but does NOT make dockerd
+# re-read /etc/docker/daemon.json — only an actual restart does.  Guarded so it
+# only fires on real drift, never on a clean replay.
+# ---------------------------------------------------------------------------
+if [[ "${DRY_RUN:-0}" != "1" ]] && guard::service_active docker; then
+    _docker_root_running="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || true)"
+    if [[ -n "${_docker_root_running}" \
+            && "${_docker_root_running}" != "/srv/data/docker" ]]; then
+        info "dockerd is running with DockerRootDir='${_docker_root_running}' but daemon.json wants /srv/data/docker — restarting docker.service to apply..."
+        # SAFE_REPLAY: guarded by DockerRootDir mismatch check above
+        systemctl restart docker || warn "systemctl restart docker failed"
+    fi
+fi
+
 smoke_20_storage() {
     [[ "${DRY_RUN:-0}" == "1" ]] && return 0
 
