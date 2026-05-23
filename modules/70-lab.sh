@@ -204,8 +204,33 @@ if ! guard::docker_network_exists traefik-proxy; then
         dry_run_echo "would docker network create traefik-proxy"
     elif guard::service_active docker; then
         # SAFE_REPLAY: guarded by guard::docker_network_exists above
-        docker network create traefik-proxy >/dev/null \
-            || warn "docker network create traefik-proxy failed"
+        #
+        # Self-heal: docker 29 on Debian 13 (iptables-nft backend) occasionally
+        # finishes startup without the DOCKER-FORWARD chain, so the first
+        # `docker network create` fails with "iptables: No chain/target/match
+        # by that name". A `systemctl restart docker` reinitialises the chains
+        # cleanly, after which the create succeeds. Capture stderr so we can
+        # match on the iptables signature and avoid restarting on unrelated
+        # failures (e.g. a name collision or daemon-down).
+        _net_err="$(docker network create traefik-proxy 2>&1 >/dev/null)" \
+            && _net_rc=0 || _net_rc=$?
+        if [[ "${_net_rc}" -ne 0 ]]; then
+            if grep -qE 'DOCKER-FORWARD|No chain/target/match by that name' <<<"${_net_err}"; then
+                warn "docker network create failed with iptables chain init error — restarting docker.service and retrying once"
+                systemctl restart docker || warn "systemctl restart docker failed"
+                # Give dockerd a moment to re-bind and re-create its chains
+                # before retrying. Without this the retry races the restart.
+                for _i in 1 2 3 4 5 6 7 8 9 10; do
+                    guard::service_active docker && docker info >/dev/null 2>&1 && break
+                    sleep 1
+                done
+                docker network create traefik-proxy >/dev/null \
+                    || warn "docker network create traefik-proxy still failed after docker restart"
+            else
+                warn "docker network create traefik-proxy failed: ${_net_err}"
+            fi
+        fi
+        unset _net_err _net_rc _i
     fi
 fi
 

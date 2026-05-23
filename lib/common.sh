@@ -59,10 +59,16 @@ deploy_config() {
 
 # Install packages with a dry-run preflight check.
 #
-# On install failure, refresh the apt index and retry once.  Catches the common
-# case where the cached Packages index points at a .deb version the mirror has
-# already rotated away (e.g. libc6-i386 2.41-12+deb13u2 → 404 after a point
-# release), without needing a full second run.sh.
+# On install failure, refresh the apt index and retry; on a second failure,
+# fall back to `--fix-missing` so unrelated packages still land when the
+# mirror is transiently inconsistent.  Catches the common case where the
+# cached Packages index points at a .deb version the mirror has already
+# rotated away (e.g. libc6-i386 2.41-12+deb13u2 → 404 after a point release)
+# AND the upstream InRelease is itself stale (Last-Modified still points at
+# the old release), so a plain `apt-get update -qq` returns 304 and reuses
+# the stale Packages index. The No-Cache hints ask CDN edges (Fastly/Cloud-
+# Front) to revalidate against origin; `--fix-missing` lets the bulk of the
+# install proceed when even that doesn't help.
 #   Example: safe_install "curl and wget" curl wget
 safe_install() {
     local desc="$1"
@@ -71,17 +77,29 @@ safe_install() {
     if ! apt-get install -y --dry-run "$@" &>/dev/null; then
         warn "Preflight check flagged issues for: ${desc}. Attempting install anyway..."
     fi
-    if ! DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" \
+    if DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" \
             -o Dpkg::Options::="--force-confdef" \
             -o Dpkg::Options::="--force-confold"; then
-        warn "Install of '${desc}' failed — refreshing apt index and retrying once..."
-        apt-get update -qq || true
-        DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" \
-            -o Dpkg::Options::="--force-confdef" \
-            -o Dpkg::Options::="--force-confold" \
-            || { warn "Some packages in '${desc}' could not be installed — continuing."; return; }
+        success "${desc} installed."
+        return
     fi
-    success "${desc} installed."
+    warn "Install of '${desc}' failed — refreshing apt index (CDN no-cache) and retrying..."
+    apt-get update -qq \
+        -o Acquire::http::No-Cache=true \
+        -o Acquire::https::No-Cache=true \
+        || true
+    if DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" \
+            -o Dpkg::Options::="--force-confdef" \
+            -o Dpkg::Options::="--force-confold"; then
+        success "${desc} installed."
+        return
+    fi
+    warn "Retry failed — attempting install with --fix-missing (skip unfetchable, install the rest)..."
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --fix-missing "$@" \
+        -o Dpkg::Options::="--force-confdef" \
+        -o Dpkg::Options::="--force-confold" \
+        || { warn "Some packages in '${desc}' could not be installed — continuing."; return; }
+    success "${desc} installed (with --fix-missing fallback — re-run after mirror catches up)."
 }
 
 # Run a command as the primary non-root user (SUDO_USER if set, else USER).
