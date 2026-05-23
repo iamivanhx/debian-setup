@@ -58,8 +58,6 @@ shell-integration-features = cursor,sudo,title
 scrollback-limit = 100000
 
 # --- bell & focus ---
-audible-bell = false
-visual-bell = false
 focus-follows-mouse = false
 
 # --- confirm-close ---
