@@ -15,6 +15,33 @@ fi
 # ---------------------------------------------------------------------------
 # 1. Backports config deployment
 # ---------------------------------------------------------------------------
+# Some Debian installers (and ad-hoc edits) leave a `trixie-backports` line in
+# /etc/apt/sources.list itself. Our canonical home for it is
+# /etc/apt/sources.list.d/backports.list; if both exist apt prints ~24 lines of
+# `Target … is configured multiple times` warnings on every invocation. Comment
+# out the in-tree duplicate so the .d/ file becomes the single source of truth.
+if grep -qE '^[[:space:]]*deb(-src)?[[:space:]]+[^#]*trixie-backports' /etc/apt/sources.list 2>/dev/null; then
+    dry_run_echo "would comment out trixie-backports lines in /etc/apt/sources.list" || {
+        cp /etc/apt/sources.list "/etc/apt/sources.list.bak.$(date +%Y%m%d_%H%M%S_%N)"
+        sed -i -E 's|^([[:space:]]*deb(-src)?[[:space:]]+[^#]*trixie-backports.*)$|# \1  # debian-setup: superseded by sources.list.d/backports.list|' /etc/apt/sources.list
+        info "Commented out trixie-backports in /etc/apt/sources.list (now managed via sources.list.d/backports.list)"
+    }
+fi
+
+# Self-heal: legacy `.bak.<timestamp>` files left by older runs of deploy_config
+# in apt's scan dirs trigger "invalid filename extension" warnings on every
+# apt invocation. Relocate any survivors to the central backup root.
+for _scan_dir in /etc/apt/apt.conf.d /etc/apt/sources.list.d /etc/apt/preferences.d; do
+    [[ -d "${_scan_dir}" ]] || continue
+    while IFS= read -r -d '' _stale_bak; do
+        _stale_dest="/var/backups/debian-setup${_scan_dir}"
+        dry_run_echo "would relocate ${_stale_bak} → ${_stale_dest}/" && continue
+        mkdir -p "${_stale_dest}"
+        mv "${_stale_bak}" "${_stale_dest}/"
+        info "Relocated stale backup ${_stale_bak} → ${_stale_dest}/"
+    done < <(find "${_scan_dir}" -maxdepth 1 -type f -name '*.bak.*' -print0 2>/dev/null)
+done
+
 deploy_template /etc/apt/sources.list.d/backports.list "backports apt source"
 deploy_template /etc/apt/preferences.d/backports "backports pin priority"
 

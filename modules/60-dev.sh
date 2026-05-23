@@ -125,7 +125,14 @@ fi
 # ---------------------------------------------------------------------------
 SFW_VERSION="${SFW_VERSION:-2.0.4}"
 _sfw_shim="${SETUP_HOME}/.local/share/mise/shims/sfw"
-if ! run_as_user test -x "${_sfw_shim}"; then
+if ! guard::command_exists mise; then
+    # safe_install above can soft-fail (e.g. transient mirror skew on a single
+    # apt dep), leaving mise un-installed. Without this gate the run_as_user
+    # calls below would spew three confusing `sudo: mise: command not found`
+    # lines. Tell the operator what to do instead.
+    warn "mise is not installed — skipping node@lts + sfw@${SFW_VERSION} bootstrap"
+    warn "  retry with: sudo apt-get update && sudo apt-get install -y mise && sudo ./run.sh"
+elif ! run_as_user test -x "${_sfw_shim}"; then
     dry_run_echo "would bootstrap mise node@lts + npm install -g sfw@${SFW_VERSION} (as ${SUDO_USER:-${USER:-}})" || {
         run_as_user mise use --global node@lts \
             || warn "mise use --global node@lts failed"

@@ -34,8 +34,23 @@ deploy_config() {
     parent_dir="$(dirname "$target")"
     mkdir -p "$parent_dir"
     if [[ -f "$target" ]]; then
+        # apt scans /etc/apt/{apt.conf.d,sources.list.d,preferences.d}/ for
+        # config snippets and prints a warning for every sibling whose
+        # extension it doesn't recognise — including our `.bak.<timestamp>`
+        # files. For those directories, divert the backup to a mirrored path
+        # under /var/backups/debian-setup so it stays out of apt's view.
+        local backup_dir
+        case "${parent_dir}" in
+            /etc/apt/apt.conf.d|/etc/apt/sources.list.d|/etc/apt/preferences.d)
+                backup_dir="/var/backups/debian-setup${parent_dir}"
+                mkdir -p "${backup_dir}"
+                ;;
+            *)
+                backup_dir="${parent_dir}"
+                ;;
+        esac
         local backup
-        backup="${target}.bak.$(date +%Y%m%d_%H%M%S_%N)"
+        backup="${backup_dir}/$(basename "$target").bak.$(date +%Y%m%d_%H%M%S_%N)"
         cp "$target" "$backup"
         info "Backed up ${target} → ${backup}"
     fi
