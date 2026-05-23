@@ -125,6 +125,19 @@ if findmnt /srv/data &>/dev/null || [[ "${DRY_RUN:-0}" == "1" ]]; then
             dry_run_echo "would create ${_dir}" || mkdir -p "${_dir}" 2>/dev/null || true
         fi
     done
+    # /srv/data/projects is the user's scratch space; root mkdir above leaves it
+    # root-owned, so converge ownership to the invoking user every run. (docker
+    # is Docker's data-root and lab is repo-managed — both intentionally stay
+    # root-owned.)
+    _storage_user="${SUDO_USER:-${USER:-}}"
+    if [[ -n "${_storage_user}" && "${_storage_user}" != "root" ]]; then
+        if dry_run_echo "would chown /srv/data/projects → ${_storage_user}:${_storage_user}"; then
+            :
+        elif guard::dir_exists /srv/data/projects; then
+            chown -R "${_storage_user}:${_storage_user}" /srv/data/projects 2>/dev/null || \
+                warn "chown /srv/data/projects failed — insufficient privileges"
+        fi
+    fi
 else
     warn "/srv/data filesystem is not active — skipping directory skeleton creation"
 fi
@@ -205,4 +218,10 @@ smoke_20_storage() {
         guard::dir_exists "${_dir}" \
             || { echo "smoke: directory ${_dir} does not exist" >&2; return 1; }
     done
+
+    local _smoke_user="${SUDO_USER:-${USER:-}}"
+    if [[ -n "${_smoke_user}" && "${_smoke_user}" != "root" ]]; then
+        [[ "$(stat -c '%U' /srv/data/projects 2>/dev/null)" == "${_smoke_user}" ]] \
+            || { echo "smoke: /srv/data/projects is not owned by ${_smoke_user}" >&2; return 1; }
+    fi
 }
