@@ -179,6 +179,24 @@ the UTM import. llvmpipe tests correctness, not performance.
     is published ([releases](https://github.com/mkasberg/ghostty-ubuntu/releases/latest)).
   - `modules/10-hardware.sh` `linux-image-amd64`, `firmware-amd-graphics`,
     `amd64-microcode`. These are machine layer, so they stay SER8-only.
+  - Apps flagged by
+    [Research: macOS inventory and best tools](https://github.com/iamivanhx/debian-setup/blob/4e336275f7f3b83d418c9ccbc2c8a32164e03d83/docs/research/macos-inventory-and-tools.md),
+    re-checked here on 2026-10-09:
+    - **1Password desktop:** the arm64 apt repo lists only `1password-cli`, while
+      the amd64 repo has `1password` too
+      ([arm64 `Packages`](https://downloads.1password.com/linux/debian/arm64/dists/stable/main/binary-arm64/Packages)).
+      On arm64 the desktop app means the tarball.
+    - **Walker:** the latest release (v2.17.2) publishes only
+      `x86_64-unknown-linux-gnu`
+      ([releases](https://github.com/abenz1267/walker/releases/latest)). On
+      arm64 it is a source build or an alternative launcher.
+    - **Ghostty trixie `.deb`:** community-built, and the release ships no
+      checksum or signature asset. Under the map's security baseline it can't be
+      verified on either arch.
+    - **Chrome stable:** Google's apt repo `Release` lists
+      `Architectures: amd64 arm64`
+      ([Release](https://dl.google.com/linux/chrome/deb/dists/stable/Release)),
+      so this one isn't a gap.
 - **Host-keyboard fidelity.** macOS and UTM intercept some modifier chords
   (Omarchy-on-UTM reports SUPER+CTRL and SUPER+ALT are swallowed). The VM can't
   validate the full keybinding set.
