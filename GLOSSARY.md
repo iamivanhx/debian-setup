@@ -28,6 +28,18 @@ _Avoid_: dotfile, default, seed, user config
 A difference between a managed file on the machine and its template. `check` reports it, and the next run backs the file up, shows the diff and restores the repo version.
 _Avoid_: local change, override, customization
 
+**Retired item**:
+Something a module once installed and now declares must be absent. Its `check` verifies the absence, and the item is deleted from the repo once the SER8 has converged past it.
+_Avoid_: migration, legacy cleanup, self-heal
+
+**Update**:
+The runner command that fetches, previews, takes the pre-update snapshot, fast-forwards the installed clone, upgrades apt and converges, in that order, after one confirm.
+_Avoid_: upgrade, pull, migrate
+
+**Pre-update snapshot**:
+The snapper snapshot of root that an update takes before it changes anything. If it fails, the update aborts.
+_Avoid_: backup, restore point
+
 **Test VM**:
 An amd64 KVM virtual machine on the SER8 where every run that changes a system is proven before it is applied to the SER8 itself.
 _Avoid_: arm64 VM, Mac VM, sandbox
