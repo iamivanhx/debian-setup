@@ -41,7 +41,7 @@ The snapper snapshot of root that an update takes before it changes anything. If
 _Avoid_: backup, restore point
 
 **Test VM**:
-An amd64 KVM virtual machine on the SER8 where every run that changes a system is proven before it is applied to the SER8 itself.
+An amd64 KVM virtual machine on the SER8, run in the user's libvirt session, where every change that alters what a run does is proven before it merges to `main`.
 _Avoid_: arm64 VM, Mac VM, sandbox
 
 **Exception**:

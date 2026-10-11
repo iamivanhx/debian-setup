@@ -1,5 +1,7 @@
 # lilypad is developed on the SER8 and tested in VMs on it, amd64 only
 
+> Superseded by `ADR-20261011-develop-anywhere-prove-in-vm`.
+
 The plan was to iterate in an arm64 VM on the Mac first and then do a clean install on the SER8. That forced every dev-layer step to support both amd64 and arm64, and it ruled out or weakened tools that ship x86_64 only (Walker, Elephant, the 1Password desktop app). Instead, lilypad is developed on the SER8 itself, and every run that changes a system is proven first in a **test VM**: an amd64 KVM virtual machine on the SER8, using virtio-gpu with virgl. Only then is it applied to the SER8. amd64 is the only architecture. The SER8 isn't in daily use yet, so it can be the test bed. A VM on the target exercises the same architecture, kernel and Mesa stack, and hardware, LUKS and NVMe could never be proven in a VM on the Mac anyway.
 
 ## Considered Options
